@@ -1,0 +1,16 @@
+[package]
+name = "mdpos-cli"
+description = "Command-line renderer for mdpos templates."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# All file and stream I/O lives here, never in the core crate.
+[dependencies]
+mdpos.workspace = true
+
+[[bin]]
+name = "mdpos"
+path = "src/main.rs"

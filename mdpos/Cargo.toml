@@ -1,0 +1,24 @@
+[package]
+name = "mdpos"
+description = "Render a formatted template string to ESC/POS bytes. Sans-IO."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# §1.1 — the core crate must never know what a printer is.
+# Adding a dependency here that touches the filesystem, the network, or an async
+# runtime is a design violation, not a convenience. Transport belongs to the caller.
+[dependencies]
+unicode-width.workspace = true
+serde = { version = "1", features = ["derive"], optional = true }
+
+[features]
+default = []
+# Only for deserializing golden-fixture profiles. Not part of the rendering contract.
+serde = ["dep:serde"]
+
+[dev-dependencies]
+mdpos = { path = ".", features = ["serde"] }
+ron = "0.12"
