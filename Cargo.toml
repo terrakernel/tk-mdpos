@@ -1,5 +1,5 @@
 [workspace]
-members = ["mdpos", "mdpos-cli", "mdpos-ffi"]
+members = ["tk-mdpos", "tk-mdpos-cli", "tk-mdpos-ffi"]
 resolver = "3"
 
 [workspace.package]
@@ -7,13 +7,13 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/terrakernel/mdpos"
+repository = "https://github.com/terrakernel/tk-mdpos"
 
 [workspace.dependencies]
-mdpos = { path = "mdpos", version = "0.1.0" }
+tk-mdpos = { path = "tk-mdpos", version = "0.1.0" }
 unicode-width = "0.2"
 
-# Panics unwinding across a C frame are undefined behaviour, so mdpos-ffi wraps every
+# Panics unwinding across a C frame are undefined behaviour, so tk-mdpos-ffi wraps every
 # entry point in catch_unwind. That only works under panic = "unwind"; abort would
 # remove the net silently. Pinned here so it cannot be flipped for a size win.
 [profile.release]

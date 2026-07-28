@@ -1,9 +1,9 @@
-# mdpos
+# tk-mdpos
 
 Turn a formatted template string into ESC/POS bytes.
 
 ```rust
-mdpos::render(template: &str, profile: &Profile) -> Result<Vec<u8>, Error>
+tk_mdpos::render(template: &str, profile: &Profile) -> Result<Vec<u8>, Error>
 ```
 
 That is the entire public contract.
@@ -59,33 +59,33 @@ Not published yet. Use a path or git dependency:
 
 ```toml
 [dependencies]
-mdpos = { git = "https://github.com/terrakernel/mdpos" }
+tk-mdpos = { git = "https://github.com/terrakernel/tk-mdpos" }
 ```
 
 ## Library
 
 ```rust
-use mdpos::Profile;
+use tk_mdpos::Profile;
 
 let template = std::fs::read_to_string("receipt.tmpl")?;   // or a database column
 let profile = Profile::epson_80mm();
 
-let bytes = mdpos::render(&template, &profile)?;
+let bytes = tk_mdpos::render(&template, &profile)?;
 send_to_printer(&bytes)?;
 ```
 
 Three entry points, all sharing the same parse and layout passes:
 
 ```rust
-mdpos::render(&t, &p)?   // -> Vec<u8>   ESC/POS bytes
-mdpos::preview(&t, &p)?  // -> String    monospace, for showing a user or a test
-mdpos::to_ops(&t, &p)?   // -> Vec<Op>   the IR, for tooling or a custom backend
+tk_mdpos::render(&t, &p)?   // -> Vec<u8>   ESC/POS bytes
+tk_mdpos::preview(&t, &p)?  // -> String    monospace, for showing a user or a test
+tk_mdpos::to_ops(&t, &p)?   // -> Vec<Op>   the IR, for tooling or a custom backend
 ```
 
 The profile is a plain struct:
 
 ```rust
-use mdpos::{Font, Profile};
+use tk_mdpos::{Font, Profile};
 
 let narrow = Profile { width_dots: 384, ..Profile::epson_80mm() };  // 58mm, 32 columns
 let dense  = Profile { font: Font::B,   ..Profile::epson_80mm() };  // 64 columns
@@ -240,24 +240,24 @@ polling all belong to the caller or to a separate crate.
 
 ## C ABI
 
-`mdpos-ffi` exposes the same contract across a flat C ABI, building `libmdpos.a` and
-`libmdpos.dylib`/`.so`. The header is `mdpos-ffi/include/mdpos.h`.
+`tk-mdpos-ffi` exposes the same contract across a flat C ABI, building `libtk_mdpos.a` and
+`libtk_mdpos.dylib`/`.so`. The header is `tk-mdpos-ffi/include/tk_mdpos.h`.
 
 ```c
-MdposProfile profile = mdpos_profile_epson_80mm();
-MdposBuf out;
+TkMdposProfile profile = tk_mdpos_profile_epson_80mm();
+TkMdposBuf out;
 
-if (mdpos_render((const uint8_t *)tmpl, strlen(tmpl), &profile, &out) == MDPOS_OK) {
+if (tk_mdpos_render((const uint8_t *)tmpl, strlen(tmpl), &profile, &out) == TK_MDPOS_OK) {
     fwrite(out.ptr, 1, out.len, printer);
 } else {
     fprintf(stderr, "mdpos: %s\n", (const char *)out.ptr);
 }
-mdpos_free(out);   // required in both branches
+tk_mdpos_free(out);   // required in both branches
 ```
 
 Three rules:
 
-1. **Every buffer must go back to `mdpos_free`**, including the ones returned alongside an
+1. **Every buffer must go back to `tk_mdpos_free`**, including the ones returned alongside an
    error. Rust allocated it and only Rust may release it — never `free()`.
 2. **Buffers are NUL-terminated at `ptr[len]`, and `len` excludes that byte.** ESC/POS
    output contains embedded zeros (`GS V 66 0` ends in one), so `%s` truncates the output —
@@ -269,8 +269,8 @@ Every entry point is wrapped in `catch_unwind`, since a panic unwinding across a
 undefined behaviour. That requires `panic = "unwind"`, which the workspace pins.
 
 ```sh
-cargo build -p mdpos-ffi --release
-cc -Imdpos-ffi/include mdpos-ffi/tests/smoke.c target/debug/libmdpos.a -o smoke && ./smoke
+cargo build -p tk-mdpos-ffi --release
+cc -Itk-mdpos-ffi/include tk-mdpos-ffi/tests/smoke.c target/debug/libtk_mdpos.a -o smoke && ./smoke
 ```
 
 That C smoke test is what verifies the header still matches the compiled ABI; the Rust
@@ -292,10 +292,10 @@ rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-and
 
 # NDK r27 or newer; cargo-ndk writes straight into the Gradle layout
 cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 \
-  -o app/src/main/jniLibs build --release -p mdpos-ffi
+  -o app/src/main/jniLibs build --release -p tk-mdpos-ffi
 ```
 
-That produces `libmdpos.so` per ABI and Gradle packages it automatically. Bind it with
+That produces `libtk_mdpos.so` per ABI and Gradle packages it automatically. Bind it with
 either a hand-written JNI shim (`extern "system" fn Java_...`, faster at runtime) or JNA
 against the existing C ABI (faster to get working, adds a dependency).
 
@@ -322,10 +322,10 @@ sunmiPrinterService.sendRAWData(bytes, null)   // Sunmi, iMin, Telpo — same sh
 
 ```sh
 rustup target add aarch64-apple-ios aarch64-apple-ios-sim
-cargo build -p mdpos-ffi --release --target aarch64-apple-ios
+cargo build -p tk-mdpos-ffi --release --target aarch64-apple-ios
 ```
 
-Package `libmdpos.a` plus `include/mdpos.h` and a `module.modulemap` as an **XCFramework**,
+Package `libtk_mdpos.a` plus `include/tk_mdpos.h` and a `module.modulemap` as an **XCFramework**,
 then consume it as a SwiftPM `binaryTarget` or drop it into Xcode. Swift calls the C ABI
 directly — no shim needed. Bitcode has not been required since Xcode 14.
 
@@ -335,7 +335,7 @@ directly — no shim needed. Bitcode has not been required since Xcode 14.
 
 ### Three things to get right
 
-1. **Wrap the buffer in something with a destructor.** `mdpos_free` must run on every path,
+1. **Wrap the buffer in something with a destructor.** `tk_mdpos_free` must run on every path,
    including errors. A Kotlin `use {}` or a Swift type with `deinit` makes that structural
    instead of a thing you have to remember.
 2. **Keep `panic = "unwind"`.** It costs roughly 100 KB against `panic = "abort"`, but

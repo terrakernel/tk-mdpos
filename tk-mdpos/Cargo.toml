@@ -1,5 +1,5 @@
 [package]
-name = "mdpos"
+name = "tk-mdpos"
 description = "Render a formatted template string to ESC/POS bytes. Sans-IO."
 version.workspace = true
 edition.workspace = true
@@ -20,5 +20,5 @@ default = []
 serde = ["dep:serde"]
 
 [dev-dependencies]
-mdpos = { path = ".", features = ["serde"] }
+tk-mdpos = { path = ".", features = ["serde"] }
 ron = "0.12"

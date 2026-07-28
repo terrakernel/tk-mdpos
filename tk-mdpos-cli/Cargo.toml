@@ -1,5 +1,5 @@
 [package]
-name = "mdpos-cli"
+name = "tk-mdpos-cli"
 description = "Command-line renderer for mdpos templates."
 version.workspace = true
 edition.workspace = true
@@ -9,8 +9,10 @@ repository.workspace = true
 
 # All file and stream I/O lives here, never in the core crate.
 [dependencies]
-mdpos.workspace = true
+tk-mdpos.workspace = true
 
+# The crate is `tk-mdpos-cli` so it is unambiguous on a shared registry; the command it
+# installs is `mdpos`, because a name on your own PATH has no such ambiguity to resolve.
 [[bin]]
 name = "mdpos"
 path = "src/main.rs"

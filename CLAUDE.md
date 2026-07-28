@@ -20,22 +20,22 @@ is the product; the parser is the cheap part.
 Scaffolded. Builds clean, `cargo test` and `cargo clippy` pass.
 
 ```
-mdpos/                  # core lib — no I/O, no async; deps: unicode-width (+ optional serde)
+tk-mdpos/                  # core lib — no I/O, no async; deps: unicode-width (+ optional serde)
   src/
-    lib.rs              # render() / preview() / to_ops() — the public contract
-    parse.rs            # template -> Block AST            done, unit-tested
-    layout.rs           # Block AST + Profile -> Vec<Op>   done, unit-tested — the product
-    ir.rs               # Op, Align, CutKind               done
-    profile.rs          # Profile, Dialect, Font, CodePage done
-    error.rs            # Error, with source line numbers  done
-    emit/escpos.rs      # Vec<Op> -> Vec<u8>               done, unit-tested
-    emit/preview.rs     # Vec<Op> -> String (monospace)    done, unit-tested
-  tests/golden.rs       # fixture harness
-mdpos-cli/              # thin binary, owns all file I/O
-mdpos-ffi/              # C ABI — cdylib + staticlib, both named libmdpos
-  include/mdpos.h       # hand-written header, kept in step with src/lib.rs
-  tests/smoke.c         # links the real staticlib; not part of cargo test
-tests/golden/           # 4 fixtures, structured as if publishable
+    lib.rs                 # render() / preview() / to_ops() — the public contract
+    parse.rs               # template -> Block AST            done, unit-tested
+    layout.rs              # Block AST + Profile -> Vec<Op>   done, unit-tested — the product
+    ir.rs                  # Op, Align, CutKind               done
+    profile.rs             # Profile, Dialect, Font, CodePage done
+    error.rs               # Error, with source line numbers  done
+    emit/escpos.rs         # Vec<Op> -> Vec<u8>               done, unit-tested
+    emit/preview.rs        # Vec<Op> -> String (monospace)    done, unit-tested
+  tests/golden.rs          # fixture harness
+tk-mdpos-cli/              # thin binary, owns all file I/O; installs as `mdpos`
+tk-mdpos-ffi/              # C ABI — cdylib + staticlib, both named libtk_mdpos
+  include/tk_mdpos.h       # hand-written header, kept in step with src/lib.rs
+  tests/smoke.c            # links the real staticlib; not part of cargo test
+tests/golden/              # 4 fixtures, structured as if publishable
 ```
 
 The v0.1 pipeline is complete end to end: a template file renders to bytes and to a preview.
@@ -43,7 +43,7 @@ What remains before §12 can be claimed is a print on real hardware, and the CP4
 in `emit::escpos::encode_text` (non-ASCII is currently rejected, which is also what blocks the
 unicode golden fixture).
 
-Keep the workspace split. The moment `mdpos` gains a dependency that touches the filesystem,
+Keep the workspace split. The moment `tk-mdpos` gains a dependency that touches the filesystem,
 §1.1 is already lost. `serde` is an optional feature used only to deserialize fixture profiles;
 it is not part of the rendering contract.
 
@@ -52,14 +52,14 @@ it is not part of the rendering contract.
 ```
 cargo test --workspace          # unit + golden fixtures
 cargo clippy --workspace --all-targets -- -D warnings
-cargo run -p mdpos-cli -- template.txt > out.bin
-cargo run -p mdpos-cli -- --preview template.txt
+cargo run -p tk-mdpos-cli -- template.txt > out.bin
+cargo run -p tk-mdpos-cli -- --preview template.txt
 UPDATE_GOLDEN=1 cargo test --test golden    # regenerate fixtures, then read the diff
 
 # C ABI — the only check that catches header drift from the compiled library.
-cargo build -p mdpos-ffi
-cc -Wall -Wextra -Imdpos-ffi/include mdpos-ffi/tests/smoke.c target/debug/libmdpos.a \
-   -o /tmp/mdpos-smoke && /tmp/mdpos-smoke
+cargo build -p tk-mdpos-ffi
+cc -Wall -Wextra -Itk-mdpos-ffi/include tk-mdpos-ffi/tests/smoke.c target/debug/libtk_mdpos.a \
+   -o /tmp/tk-mdpos-smoke && /tmp/tk-mdpos-smoke
 # add -fsanitize=address to check the allocation contract
 ```
 
@@ -134,14 +134,14 @@ Made while writing the C ABI:
 - **Buffers are always NUL-terminated at `ptr[len]`, with `len` excluding it.** ESC/POS output
   contains embedded zeros, so `%s` on output truncates — but it can never overrun. Terminating
   unconditionally costs one byte and removes a whole class of C caller mistake.
-- **`cap` round-trips through `MdposBuf`** so `Vec::from_raw_parts` can rebuild the allocation
+- **`cap` round-trips through `TkMdposBuf`** so `Vec::from_raw_parts` can rebuild the allocation
   exactly. The host must never call `free()`.
-- **The FFI lib is named `mdpos`** (artifact `libmdpos.a`/`.dylib`) and deliberately omits
+- **The FFI lib is named `tk_mdpos`** (artifact `libtk_mdpos.a`/`.dylib`) and deliberately omits
   `rlib`, which would be ambiguous with the core crate's own rlib and breaks rustdoc. Rust
-  callers depend on `mdpos` directly.
+  callers depend on `tk-mdpos` directly.
 - **`panic = "unwind"` is pinned in the workspace `[profile.release]`.** Every entry point is
   wrapped in `catch_unwind`; `panic = "abort"` would remove that net silently.
-- **`mdpos_columns` and `mdpos_format_version` are exported** so hosts never hardcode 48 and can
+- **`tk_mdpos_columns` and `tk_mdpos_format_version` are exported** so hosts never hardcode 48 and can
   record which format version a stored template was written against.
 - **The header is hand-written, not cbindgen'd**, to avoid a build dependency. `tests/smoke.c` is
   therefore load-bearing: it is the only thing that catches the header drifting from the ABI.
@@ -153,7 +153,7 @@ Made while writing the C ABI:
 These come from `INSTRUCTIONS.md` §1 and were settled before the repo existed. They are not
 defaults to be improved on.
 
-**No transport in the core.** No tokio, serialport, USB, sockets, or file handles in `mdpos`.
+**No transport in the core.** No tokio, serialport, USB, sockets, or file handles in `tk-mdpos`.
 The largest target hardware (Sunmi, iMin, Telpo on Android) exposes only `sendRAWData(byte[])`
 through a vendor AIDL service — producing bytes is the only thing that works there. Queueing,
 chunking, retry, `DLE EOT` status polling, and job atomicity all belong to the caller.
@@ -203,7 +203,7 @@ Out — not "later," but *not decided*: WASM, QR/barcode/bitmaps, profile regist
 loading, data interpolation of any kind, web services, Star/ZPL/TSPL dialects, publishing the
 conformance corpus.
 
-**`mdpos-ffi` is an exception, built at the user's explicit direction ahead of the §12 gate.**
+**`tk-mdpos-ffi` is an exception, built at the user's explicit direction ahead of the §12 gate.**
 `INSTRUCTIONS.md` §2 still lists FFI as out of scope; that document has not been amended. The
 concern raised at the time and overruled: an ABI is a compatibility anchor, so the `Op` IR and
 the template syntax are now harder to change if a real print shows the layout engine is wrong.

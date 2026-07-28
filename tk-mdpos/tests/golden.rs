@@ -19,7 +19,7 @@
 
 use std::path::{Path, PathBuf};
 
-use mdpos::Profile;
+use tk_mdpos::Profile;
 
 fn corpus_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -65,7 +65,7 @@ fn golden_fixtures() {
         let expected_err = case.join("expected.err");
         if expected_err.exists() {
             let want = std::fs::read_to_string(&expected_err).unwrap();
-            match mdpos::render(&template, &profile) {
+            match tk_mdpos::render(&template, &profile) {
                 Ok(_) => failures.push(format!(
                     "{name}: expected the template to be rejected, but it rendered\n  wanted: {}",
                     want.trim()
@@ -79,9 +79,9 @@ fn golden_fixtures() {
             continue;
         }
 
-        let bytes = mdpos::render(&template, &profile)
+        let bytes = tk_mdpos::render(&template, &profile)
             .unwrap_or_else(|e| panic!("{name}: render failed: {e}"));
-        let text = mdpos::preview(&template, &profile)
+        let text = tk_mdpos::preview(&template, &profile)
             .unwrap_or_else(|e| panic!("{name}: preview failed: {e}"));
 
         if updating() {

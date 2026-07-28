@@ -11,7 +11,7 @@
 use std::io::{self, Read, Write};
 use std::process::ExitCode;
 
-use mdpos::Profile;
+use tk_mdpos::Profile;
 
 const USAGE: &str = "\
 mdpos — render a receipt template to ESC/POS bytes
@@ -76,9 +76,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut stdout = io::stdout().lock();
     if preview {
-        stdout.write_all(mdpos::preview(&template, &profile)?.as_bytes())?;
+        stdout.write_all(tk_mdpos::preview(&template, &profile)?.as_bytes())?;
     } else {
-        stdout.write_all(&mdpos::render(&template, &profile)?)?;
+        stdout.write_all(&tk_mdpos::render(&template, &profile)?)?;
     }
     stdout.flush()?;
 

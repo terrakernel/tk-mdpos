@@ -12,30 +12,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mdpos"
-version = "0.1.0"
-dependencies = [
- "mdpos",
- "ron",
- "serde",
- "unicode-width",
-]
-
-[[package]]
-name = "mdpos-cli"
-version = "0.1.0"
-dependencies = [
- "mdpos",
-]
-
-[[package]]
-name = "mdpos-ffi"
-version = "0.1.0"
-dependencies = [
- "mdpos",
-]
-
-[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -112,6 +88,30 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "tk-mdpos"
+version = "0.1.0"
+dependencies = [
+ "ron",
+ "serde",
+ "tk-mdpos",
+ "unicode-width",
+]
+
+[[package]]
+name = "tk-mdpos-cli"
+version = "0.1.0"
+dependencies = [
+ "tk-mdpos",
+]
+
+[[package]]
+name = "tk-mdpos-ffi"
+version = "0.1.0"
+dependencies = [
+ "tk-mdpos",
 ]
 
 [[package]]
