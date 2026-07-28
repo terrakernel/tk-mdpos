@@ -8,7 +8,12 @@ NNN-short-name/
   profile.ron     optional; defaults to Profile::epson_80mm()
   expected.bin    ESC/POS bytes
   expected.txt    monospace preview
+  expected.err    instead of the two above: the rejection this template must produce
 ```
+
+A fixture with `expected.err` asserts that the template is *refused*, matching `Error`'s
+`Display` output. Refusing a template is a feature — a wrapped total is worse than a
+failed render — so the corpus has to pin the refusals too.
 
 Both backends snapshot from the same `input.tmpl`, which is what keeps the preview
 honest about what the bytes will do.
@@ -34,15 +39,24 @@ deployed templates must render identically in perpetuity.
 )
 ```
 
-## Cases to write first
+## Current cases
 
-These are the four places `INSTRUCTIONS.md` §5 predicts the layout engine will be wrong,
-so they are worth having before the engine exists rather than after:
+These cover the four places `INSTRUCTIONS.md` §5 predicts the layout engine will be wrong:
 
-- `001-basic-columns` — the `{cols 20,10:r,12:r}` case from §4.
-- `002-double-width-grid` — `{size 2x2}` halving the grid mid-document.
-- `003-unicode-wrap` — wrapping where `unicode-width` and `chars().count()` disagree.
-- `004-right-align-no-wrap` — overflow in a `:r` column must be an error, not a wrap.
+- `001-basic-columns` — the `{cols 20,10:r,12:r}` receipt from §4.
+- `002-double-width-grid` — `{size 2x2}` halving the grid mid-document, including a
+  magnified column row whose positions must scale with it.
+- `003-long-name-wrap` — long product names wrapping, with a hanging indent on a column
+  that is *not* the first one, so continuation lines have somewhere wrong to go.
+- `004-right-align-no-wrap` — overflow in a `:r` column is an error, not a wrap.
+
+## Still missing
+
+A unicode fixture, which is the one §5.3 asks for. It is blocked on the CP437 high range
+(0x80..=0xFF) in `emit::escpos::encode_text`: until that table exists, any non-ASCII
+character is rejected, so no `expected.bin` can be produced. Width *measurement* is
+already `unicode-width` throughout and covered by unit tests in `layout` and
+`emit::preview`. Add the fixture with the encoder table, not before.
 
 ## Publishing
 

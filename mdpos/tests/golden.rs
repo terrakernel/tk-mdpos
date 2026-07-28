@@ -59,6 +59,26 @@ fn golden_fixtures() {
             Err(_) => Profile::epson_80mm(),
         };
 
+        // A fixture with expected.err asserts a rejection instead of an output. Refusing
+        // a template is a feature — a wrapped total is worse than a failed render — so
+        // the corpus has to be able to pin the refusals too.
+        let expected_err = case.join("expected.err");
+        if expected_err.exists() {
+            let want = std::fs::read_to_string(&expected_err).unwrap();
+            match mdpos::render(&template, &profile) {
+                Ok(_) => failures.push(format!(
+                    "{name}: expected the template to be rejected, but it rendered\n  wanted: {}",
+                    want.trim()
+                )),
+                Err(e) if e.to_string().trim() != want.trim() => failures.push(format!(
+                    "{name}: wrong rejection\n  expected: {}\n  actual:   {e}",
+                    want.trim()
+                )),
+                Err(_) => {}
+            }
+            continue;
+        }
+
         let bytes = mdpos::render(&template, &profile)
             .unwrap_or_else(|e| panic!("{name}: render failed: {e}"));
         let text = mdpos::preview(&template, &profile)

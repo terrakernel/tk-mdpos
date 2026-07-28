@@ -88,11 +88,15 @@ fn commit(out: &mut String, line: &mut String, justify: Align, cols: usize, mag_
         return;
     }
 
-    // `{size 2x2}` halves the effective grid, so justification pads against 24 columns,
-    // not 48. Getting this wrong is the single most common layout bug and the preview
-    // exists to make it visible.
-    let effective = cols / usize::from(mag_w.max(1));
-    let pad = effective.saturating_sub(width_of(line));
+    // Everything here is measured in *base* cells, the same units `Op::AbsPos` resolves
+    // to, so the two never disagree about where column 20 is.
+    //
+    // A magnified character occupies `mag_w` base cells on paper even though it occupies
+    // one cell in a terminal, so the text is measured at its printed width and then drawn
+    // narrow. The line therefore starts where it really starts and ends early — position
+    // is what layout bugs corrupt, and position is what this has to get right.
+    let printed = width_of(line) * usize::from(mag_w.max(1));
+    let pad = cols.saturating_sub(printed);
 
     match justify {
         Align::Left => {}
@@ -137,13 +141,15 @@ mod tests {
     }
 
     #[test]
-    fn centering_uses_the_magnified_grid() {
+    fn centering_accounts_for_the_printed_width_of_magnified_text() {
         let p = Profile::epson_80mm();
 
         let normal = emit(&[Op::Justify(Align::Center), Op::Text("HI\n".into())], &p).unwrap();
         assert_eq!(normal, format!("{}HI\n", " ".repeat(23)));
 
-        // At 2x the grid is 24 columns, so the same text centers at 11, not 23.
+        // At 2x, "HI" covers 4 base cells on paper, so the device centers it at cell 22.
+        // Predicting cell 11 would be measuring in magnified cells while `AbsPos` is
+        // measured in base ones — two coordinate systems in one preview.
         let doubled = emit(
             &[
                 Op::Justify(Align::Center),
@@ -153,7 +159,7 @@ mod tests {
             &p,
         )
         .unwrap();
-        assert_eq!(doubled, format!("{}HI\n", " ".repeat(11)));
+        assert_eq!(doubled, format!("{}HI\n", " ".repeat(22)));
     }
 
     #[test]

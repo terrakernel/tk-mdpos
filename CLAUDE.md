@@ -24,7 +24,7 @@ mdpos/                  # core lib — no I/O, no async; deps: unicode-width (+ 
   src/
     lib.rs              # render() / preview() / to_ops() — the public contract
     parse.rs            # template -> Block AST            done, unit-tested
-    layout.rs           # Block AST + Profile -> Vec<Op>   [STUB — todo!()] the product
+    layout.rs           # Block AST + Profile -> Vec<Op>   done, unit-tested — the product
     ir.rs               # Op, Align, CutKind               done
     profile.rs          # Profile, Dialect, Font, CodePage done
     error.rs            # Error, with source line numbers  done
@@ -32,11 +32,13 @@ mdpos/                  # core lib — no I/O, no async; deps: unicode-width (+ 
     emit/preview.rs     # Vec<Op> -> String (monospace)    done, unit-tested
   tests/golden.rs       # fixture harness
 mdpos-cli/              # thin binary, owns all file I/O
-tests/golden/           # fixtures, structured as if publishable — none written yet
+tests/golden/           # 4 fixtures, structured as if publishable
 ```
 
-`layout()` is `todo!()`, so `render()` and `preview()` still panic. That is the whole of the
-remaining v0.1 work.
+The v0.1 pipeline is complete end to end: a template file renders to bytes and to a preview.
+What remains before §12 can be claimed is a print on real hardware, and the CP437 high range
+in `emit::escpos::encode_text` (non-ASCII is currently rejected, which is also what blocks the
+unicode golden fixture).
 
 Keep the workspace split. The moment `mdpos` gains a dependency that touches the filesystem,
 §1.1 is already lost. `serde` is an optional feature used only to deserialize fixture profiles;
@@ -91,6 +93,28 @@ Made while writing the parser:
 - **`---` needs three dashes**, so a lone `-` in a cell stays literal.
 - **A leading UTF-8 BOM is stripped.** Templates pasted from Windows editors carry one and it
   would otherwise make `{v 1}` unrecognizable — a confusing failure for a format edited by hand.
+
+Made while writing the layout engine:
+
+- **Column widths are in *current* characters.** `{cols 20,...}` under `{size 2x2}` means 20
+  double-width characters — 40 base cells, 480 dots — and is validated against
+  `columns_at(2)` = 24, so that spec is correctly rejected. The alternative reading (widths
+  fixed in base cells) would make `{cols}` and `{size}` silently independent.
+- **Plain lines delegate justification to the device** (`ESC a`), while column rows force
+  `Justify(Left)` and position with `AbsPos`. Absolute positioning is measured from the left
+  margin, so the device must not also be centering the line buffer — the two cannot both be
+  in play on one line.
+- **`AbsPos` is emitted for every cell, including the first at dot 0.** Four bytes is cheaper
+  than reasoning about what the line buffer was left holding.
+- **Text ops coalesce.** `text()` merges into the previous op when it is also `Text`, so
+  fixtures don't fill with single-character ops and a real diff stays visible.
+- **Device-state mirrors** (`dev_justify`, `dev_mag`, `dev_attrs`) start at what `ESC @` leaves
+  behind, so `{left}` or `{size 1x1}` at the top of a template emits nothing.
+- **`FINAL_FEED = 4`** lines before an auto-appended cut. The cut command already feeds; this
+  is so the last printed line isn't flush against the tear edge.
+- **The preview works in base cells throughout**, matching `AbsPos`. Magnified text is measured
+  at its printed width and then drawn narrow, so a 2x line starts where it really starts and
+  ends early. Position is what layout bugs corrupt, so position is what the preview gets right.
 
 ---
 

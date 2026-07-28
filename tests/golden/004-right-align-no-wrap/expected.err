@@ -1,0 +1,1 @@
+line 3: "1.250.000" overflows right-aligned column 2 (width 6); right-aligned columns never wrap
