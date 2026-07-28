@@ -6,6 +6,16 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+authors.workspace = true
+readme = "../README.md"
+keywords = ["escpos", "receipt", "thermal-printer", "pos", "printer"]
+categories = ["hardware-support", "template-engine", "text-processing"]
+
+# The golden corpus lives at the workspace root and is reached via `../tests/golden`,
+# which does not exist once the crate is unpacked from a .crate archive. Shipping the
+# harness without its fixtures means `cargo test` fails for anyone who downloads this,
+# so the harness stays a repo-level check. The 51 unit tests live in `src/` and do ship.
+exclude = ["tests/"]
 
 # §1.1 — the core crate must never know what a printer is.
 # Adding a dependency here that touches the filesystem, the network, or an async
