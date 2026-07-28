@@ -402,7 +402,7 @@ diff by hand.
 
 ## License
 
-Copyright (c) 2026 TerraKernel Pte Ltd.
+Copyright (c) 2026 TERRAKERNEL PTE. LTD.
 
 Licensed under either of
 
