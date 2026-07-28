@@ -153,6 +153,64 @@ line 3: "1.250.000" overflows right-aligned column 2 (width 6); right-aligned co
 
 Left and centered columns wrap, with continuation lines returning to the column's own start.
 
+## Interpolating data
+
+**This library has no data binding, and will not grow any.** It renders a finished string.
+Building that string — looping over line items, formatting currency, formatting dates — is
+your application's job, in whatever language it is already written in.
+
+That is a deliberate limit rather than a missing feature. Mustache and Handlebars are data
+*binding* with no concept of bold or centre; once the caller has interpolated the data, a
+template with no tags left in it is just a string. There is nothing for mdpos to add.
+
+```rust
+let mut tmpl = String::from("{cols 24,10:r,12:r}\n");
+for item in &order.items {
+    tmpl += &format!("{} | {} x {} | {}\n",
+        escape(&item.name), item.qty, money(item.price), money(item.total));
+}
+```
+
+### Escape the values, never the template
+
+Interpolated values become template *source*. A product genuinely named
+`Nasi Goreng | Spesial` turns a three-cell row into four and the render fails with
+`ColumnCountMismatch`; a name containing `**` silently toggles bold.
+
+The parser has one escape rule — `\` makes the next character literal — so the guard is
+short:
+
+```rust
+fn escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if matches!(c, '\\' | '|' | '*' | '_' | '{') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+```
+
+| Value | Escaped | Prints as |
+|---|---|---|
+| `Nasi Goreng \| Spesial` | `Nasi Goreng \\\| Spesial` | `Nasi Goreng \| Spesial` |
+| `**PROMO** Ayam` | `\*\*PROMO\*\* Ayam` | `**PROMO** Ayam` |
+| `Kopi_Susu__Gula` | `Kopi\_Susu\_\_Gula` | `Kopi_Susu__Gula` |
+| `{cut} Es Teh` | `\{cut} Es Teh` | `{cut} Es Teh` |
+
+Two things escaping does not cover:
+
+- **A value that is the entire content of a line and consists only of dashes** becomes a
+  full-width rule. If that is reachable, prefix the line with a backslash: `\---` prints
+  three dashes.
+- **Leading and trailing whitespace is stripped** from every line and cell, so a value that
+  depends on it will lose it. Use `\ ` for a deliberate leading space.
+
+If you find yourself copying `escape` into a third place, that is the signal to make it a
+small crate of its own — logic-less, escaping by default. Not part of this one.
+
 ## Errors
 
 `Error` implements `Display` and `std::error::Error`, and carries the 1-based source line.
