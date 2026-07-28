@@ -32,6 +32,9 @@ mdpos/                  # core lib — no I/O, no async; deps: unicode-width (+ 
     emit/preview.rs     # Vec<Op> -> String (monospace)    done, unit-tested
   tests/golden.rs       # fixture harness
 mdpos-cli/              # thin binary, owns all file I/O
+mdpos-ffi/              # C ABI — cdylib + staticlib, both named libmdpos
+  include/mdpos.h       # hand-written header, kept in step with src/lib.rs
+  tests/smoke.c         # links the real staticlib; not part of cargo test
 tests/golden/           # 4 fixtures, structured as if publishable
 ```
 
@@ -48,10 +51,16 @@ it is not part of the rendering contract.
 
 ```
 cargo test --workspace          # unit + golden fixtures
-cargo clippy --workspace --all-targets
+cargo clippy --workspace --all-targets -- -D warnings
 cargo run -p mdpos-cli -- template.txt > out.bin
 cargo run -p mdpos-cli -- --preview template.txt
 UPDATE_GOLDEN=1 cargo test --test golden    # regenerate fixtures, then read the diff
+
+# C ABI — the only check that catches header drift from the compiled library.
+cargo build -p mdpos-ffi
+cc -Wall -Wextra -Imdpos-ffi/include mdpos-ffi/tests/smoke.c target/debug/libmdpos.a \
+   -o /tmp/mdpos-smoke && /tmp/mdpos-smoke
+# add -fsanitize=address to check the allocation contract
 ```
 
 Golden fixtures are regenerated deliberately, never automatically. If a change rewrites a
@@ -116,6 +125,27 @@ Made while writing the layout engine:
   at its printed width and then drawn narrow, so a 2x line starts where it really starts and
   ends early. Position is what layout bugs corrupt, so position is what the preview gets right.
 
+Made while writing the C ABI:
+
+- **One out-buffer carries both results and errors.** On any failure it holds a UTF-8 message
+  instead of bytes. `Error` carries source line numbers and that text is for whoever edits the
+  template — a bare status code would discard the useful half. It also means one free function
+  and no thread-local `last_error`.
+- **Buffers are always NUL-terminated at `ptr[len]`, with `len` excluding it.** ESC/POS output
+  contains embedded zeros, so `%s` on output truncates — but it can never overrun. Terminating
+  unconditionally costs one byte and removes a whole class of C caller mistake.
+- **`cap` round-trips through `MdposBuf`** so `Vec::from_raw_parts` can rebuild the allocation
+  exactly. The host must never call `free()`.
+- **The FFI lib is named `mdpos`** (artifact `libmdpos.a`/`.dylib`) and deliberately omits
+  `rlib`, which would be ambiguous with the core crate's own rlib and breaks rustdoc. Rust
+  callers depend on `mdpos` directly.
+- **`panic = "unwind"` is pinned in the workspace `[profile.release]`.** Every entry point is
+  wrapped in `catch_unwind`; `panic = "abort"` would remove that net silently.
+- **`mdpos_columns` and `mdpos_format_version` are exported** so hosts never hardcode 48 and can
+  record which format version a stored template was written against.
+- **The header is hand-written, not cbindgen'd**, to avoid a build dependency. `tests/smoke.c` is
+  therefore load-bearing: it is the only thing that catches the header drifting from the ABI.
+
 ---
 
 ## Constraints that override ordinary judgment
@@ -169,9 +199,15 @@ Concentrated in `layout.rs`. In rough order of how often they bite:
 v0.1 is deliberately small: one hardcoded 80mm Epson profile, the syntax subset in §4, two
 backends, a CLI, golden tests.
 
-Out — not "later," but *not decided*: FFI/C ABI, WASM, Android, QR/barcode/bitmaps, profile
-registry or TOML loading, data interpolation of any kind, web services, Star/ZPL/TSPL dialects,
-publishing the conformance corpus.
+Out — not "later," but *not decided*: WASM, QR/barcode/bitmaps, profile registry or TOML
+loading, data interpolation of any kind, web services, Star/ZPL/TSPL dialects, publishing the
+conformance corpus.
+
+**`mdpos-ffi` is an exception, built at the user's explicit direction ahead of the §12 gate.**
+`INSTRUCTIONS.md` §2 still lists FFI as out of scope; that document has not been amended. The
+concern raised at the time and overruled: an ABI is a compatibility anchor, so the `Op` IR and
+the template syntax are now harder to change if a real print shows the layout engine is wrong.
+Nothing has been printed on hardware yet. Treat the C ABI as provisional until it has.
 
 Do not add any of these opportunistically, and do not add scaffolding "so it's ready later."
 None of it can be evaluated until the layout engine exists and is known to be good.

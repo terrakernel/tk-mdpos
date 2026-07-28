@@ -180,6 +180,44 @@ From an application: write the bytes to a serial port, a TCP socket on port 9100
 them to a vendor SDK. Queueing, chunking, retries, job atomicity, and paper-out status
 polling all belong to the caller or to a separate crate.
 
+## C ABI
+
+`mdpos-ffi` exposes the same contract across a flat C ABI, building `libmdpos.a` and
+`libmdpos.dylib`/`.so`. The header is `mdpos-ffi/include/mdpos.h`.
+
+```c
+MdposProfile profile = mdpos_profile_epson_80mm();
+MdposBuf out;
+
+if (mdpos_render((const uint8_t *)tmpl, strlen(tmpl), &profile, &out) == MDPOS_OK) {
+    fwrite(out.ptr, 1, out.len, printer);
+} else {
+    fprintf(stderr, "mdpos: %s\n", (const char *)out.ptr);
+}
+mdpos_free(out);   // required in both branches
+```
+
+Three rules:
+
+1. **Every buffer must go back to `mdpos_free`**, including the ones returned alongside an
+   error. Rust allocated it and only Rust may release it — never `free()`.
+2. **Buffers are NUL-terminated at `ptr[len]`, and `len` excludes that byte.** ESC/POS
+   output contains embedded zeros (`GS V 66 0` ends in one), so `%s` truncates the output —
+   but can never read past the allocation. Use `len`.
+3. **Errors come back as a message, not just a code.** Template errors carry their source
+   line and that text is for whoever edits the template.
+
+Every entry point is wrapped in `catch_unwind`, since a panic unwinding across a C frame is
+undefined behaviour. That requires `panic = "unwind"`, which the workspace pins.
+
+```sh
+cargo build -p mdpos-ffi --release
+cc -Imdpos-ffi/include mdpos-ffi/tests/smoke.c target/debug/libmdpos.a -o smoke && ./smoke
+```
+
+That C smoke test is what verifies the header still matches the compiled ABI; the Rust
+tests cannot catch header drift.
+
 ## Clone printers
 
 `{raw HEX}` is an escape hatch, not a hack. Clone printers — Xprinter, Rongta, EPPOS,
@@ -210,9 +248,9 @@ Known limitations:
 - One built-in profile (80mm, Font A, Epson). No profile registry or TOML loading.
 - Not yet verified against real hardware.
 
-Out of scope for v0.1, and not merely deferred: FFI and C ABI, WASM, Android bindings, QR
-codes, barcodes, images, data interpolation, and the Star, ZPL, and TSPL dialects. None of
-them can be evaluated sensibly until the layout engine has proven itself in print.
+Out of scope for v0.1, and not merely deferred: WASM, QR codes, barcodes, images, data
+interpolation, and the Star, ZPL, and TSPL dialects. None of them can be evaluated sensibly
+until the layout engine has proven itself in print.
 
 ## Development
 

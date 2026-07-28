@@ -1,0 +1,21 @@
+[package]
+name = "mdpos-ffi"
+description = "C ABI for mdpos. Template string in, ESC/POS bytes out."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "mdpos"
+# cdylib for hosts that dlopen or link dynamically (JNI, .NET, Node, Python ctypes);
+# staticlib for iOS and for anyone who wants one artifact with no runtime lookup.
+#
+# No `rlib`: this lib is deliberately named `mdpos` so the artifact is `libmdpos.so` /
+# `.dylib` / `.a`, and an rlib under that name is ambiguous with the core crate's own.
+# Rust callers should depend on `mdpos` directly rather than going through the C ABI.
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+mdpos.workspace = true
