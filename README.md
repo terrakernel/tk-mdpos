@@ -402,4 +402,4 @@ diff by hand.
 
 ## License
 
-MIT OR Apache-2.0.
+MIT. Copyright (c) 2026 TerraKernel Pte Ltd. See [LICENSE](LICENSE).
