@@ -218,6 +218,80 @@ cc -Imdpos-ffi/include mdpos-ffi/tests/smoke.c target/debug/libmdpos.a -o smoke 
 That C smoke test is what verifies the header still matches the compiled ABI; the Rust
 tests cannot catch header drift.
 
+## Android and iOS
+
+Nothing below has been built or verified yet — no cross targets are installed and there are
+no Kotlin or Swift wrappers in this repo. This is the path, with the landmines marked.
+
+For size reference, the host build with `lto = "fat"`, `opt-level = "z"` and stripped comes
+to **311 KB** exporting **7 symbols**. There are no callbacks, no threads, and no I/O, which
+is what makes this straightforward on both platforms.
+
+### Android
+
+```sh
+rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+
+# NDK r27 or newer; cargo-ndk writes straight into the Gradle layout
+cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 \
+  -o app/src/main/jniLibs build --release -p mdpos-ffi
+```
+
+That produces `libmdpos.so` per ABI and Gradle packages it automatically. Bind it with
+either a hand-written JNI shim (`extern "system" fn Java_...`, faster at runtime) or JNA
+against the existing C ABI (faster to get working, adds a dependency).
+
+Then hand the bytes to the printer. On the vendor handhelds this is the whole reason the
+core is sans-IO:
+
+```kotlin
+val bytes: ByteArray = mdposRender(template, profile)
+sunmiPrinterService.sendRAWData(bytes, null)   // Sunmi, iMin, Telpo — same shape
+```
+
+> **16KB page size.** Android 15+ requires 16KB-aligned native libraries, and Rust does not
+> do it for you:
+>
+> ```
+> -C link-arg=-Wl,-z,max-page-size=16384
+> ```
+>
+> The trap is that omitting it **passes local testing and fails Play review**. Check the
+> current Play policy rather than trusting this note — the deadlines here have moved more
+> than once.
+
+### iOS
+
+```sh
+rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+cargo build -p mdpos-ffi --release --target aarch64-apple-ios
+```
+
+Package `libmdpos.a` plus `include/mdpos.h` and a `module.modulemap` as an **XCFramework**,
+then consume it as a SwiftPM `binaryTarget` or drop it into Xcode. Swift calls the C ABI
+directly — no shim needed. Bitcode has not been required since Xcode 14.
+
+> **MFi.** The blocker on iOS is hardware, not code. Bluetooth *Classic* printers require
+> the printer vendor to be MFi-certified; BLE via CoreBluetooth has no such gate. Settle
+> this before writing any Swift.
+
+### Three things to get right
+
+1. **Wrap the buffer in something with a destructor.** `mdpos_free` must run on every path,
+   including errors. A Kotlin `use {}` or a Swift type with `deinit` makes that structural
+   instead of a thing you have to remember.
+2. **Keep `panic = "unwind"`.** It costs roughly 100 KB against `panic = "abort"`, but
+   panics unwinding through a JNI or Swift frame are undefined behaviour and `catch_unwind`
+   cannot work without it. The workspace pins it deliberately.
+3. **Error messages are English UTF-8 carrying template line numbers.** They are written for
+   whoever edits the template, not for the customer holding the receipt. Surface them in
+   your admin UI and log them; do not put them on screen at the till.
+
+If you end up hand-writing both a Kotlin and a Swift wrapper, it is worth a few minutes
+looking at UniFFI, which generates both from the Rust API. It would largely replace this
+crate rather than sit on top of it, and for a surface of three functions that matter the
+hand-written C ABI is probably still the better trade — but make that call deliberately.
+
 ## Clone printers
 
 `{raw HEX}` is an escape hatch, not a hack. Clone printers — Xprinter, Rongta, EPPOS,
