@@ -55,12 +55,19 @@ TOTAL                               65.000
 
 ## Install
 
-Not published yet. Use a path or git dependency:
-
 ```toml
 [dependencies]
-tk-mdpos = { git = "https://github.com/terrakernel/tk-mdpos" }
+tk-mdpos = "0.1"
 ```
+
+The CLI and the C ABI are not published. Both live in this repository and are built from it:
+
+```sh
+cargo install --git https://github.com/terrakernel/tk-mdpos tk-mdpos-cli
+```
+
+`tk-mdpos-ffi` stays unpublished until the layout engine has been verified against real
+hardware — an ABI is a compatibility anchor, and anchoring it before that would be premature.
 
 ## Library
 
