@@ -23,7 +23,7 @@ Scaffolded. Builds clean, `cargo test` and `cargo clippy` pass.
 mdpos/                  # core lib — no I/O, no async; deps: unicode-width (+ optional serde)
   src/
     lib.rs              # render() / preview() / to_ops() — the public contract
-    parse.rs            # template -> Block AST            [STUB — todo!()]
+    parse.rs            # template -> Block AST            done, unit-tested
     layout.rs           # Block AST + Profile -> Vec<Op>   [STUB — todo!()] the product
     ir.rs               # Op, Align, CutKind               done
     profile.rs          # Profile, Dialect, Font, CodePage done
@@ -35,8 +35,8 @@ mdpos-cli/              # thin binary, owns all file I/O
 tests/golden/           # fixtures, structured as if publishable — none written yet
 ```
 
-`parse()` and `layout()` are `todo!()`, so `render()` and `preview()` panic. That is the whole
-of the remaining v0.1 work, and it is deliberately the part that was not guessed at.
+`layout()` is `todo!()`, so `render()` and `preview()` still panic. That is the whole of the
+remaining v0.1 work.
 
 Keep the workspace split. The moment `mdpos` gains a dependency that touches the filesystem,
 §1.1 is already lost. `serde` is an optional feature used only to deserialize fixture profiles;
@@ -72,6 +72,25 @@ Not in `INSTRUCTIONS.md`; revisit freely, but know they were choices:
   a command the mechanism ignores.
 - **`Profile::columns_at(mag)`** exists so layout has no excuse to recompute the magnified grid
   by hand at each call site.
+
+Made while writing the parser:
+
+- **Content lines and cells are trimmed at both ends.** This is the format's whole differentiator
+  from ReceiptLine made concrete: whitespace is never load-bearing, alignment is stated with
+  `:r`. `\` escapes the following character, so `\ Total` still gets a literal leading space.
+- **One escape rule, not a table.** `\` makes the next character literal — covers `\|`, `\*`,
+  `\_`, `\{`, `\\`.
+- **`**` and `__` toggle, and reset at every cell boundary.** An unclosed `**` bolds the rest of
+  its cell and stops. Attribute leakage is exactly the bug class §5.5 is about.
+- **`Block::Blank`** distinguishes an empty source line from a row of empty cells. Without it,
+  layout has to guess.
+- **`{v N}` must be the first directive**, and a version above `MAX_VERSION` is an error. The
+  string carries the compatibility promise, so it is worth being strict about early.
+- **`{cols}` state lives in the parser**, because it decides whether `|` is a separator or
+  literal text — syntax, not layout. Cell-count mismatches are caught here, with a line number.
+- **`---` needs three dashes**, so a lone `-` in a cell stays literal.
+- **A leading UTF-8 BOM is stripped.** Templates pasted from Windows editors carry one and it
+  would otherwise make `{v 1}` unrecognizable — a confusing failure for a format edited by hand.
 
 ---
 
