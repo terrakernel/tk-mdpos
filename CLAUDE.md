@@ -532,13 +532,24 @@ Unix command and translate it by eye.
 
 ### The NuGet release job
 
-Cross-compile the cdylib per RID and upload the artifacts, because one machine will not
-produce win-x64, linux-x64, osx-arm64 and android-arm64 comfortably.
+**RIDs are decided (Julian, 2026-08-15): `win-x64` and `linux-x64`. That is the whole
+claim.** `osx-*` and `android-*` are deliberately not shipped — do not add them because a
+runner could produce them, and do not describe the package as supporting a platform it does
+not carry a binary for. Revisit only if someone asks for one.
 
-**Open decision — which RIDs to claim.** Not a packaging detail: Android needs an NDK in the
-job, which is meaningfully more setup than the desktop targets. If the real hardware is
-Sunmi/iMin/Telpo then `android-arm64` outranks `win-x64`; if the near-term goal is a Windows
-POS host, it does not. Ask before building the matrix.
+**Neither target can be built on the current development machine**, which is macOS arm64.
+`x86_64-pc-windows-msvc` needs the MSVC toolchain, and `x86_64-unknown-linux-gnu` needs a
+cross linker or a container. This is the argument for the release job existing at all — but
+note it does **not** require acquiring x86 hardware: GitHub's `windows-latest` and
+`ubuntu-latest` runners are both x86-64, so each target builds *natively* on its own runner
+and there is no cross-compilation anywhere in the workflow. Keep it that way; a native build
+per runner is why this job stays simple.
+
+Consequence for local work: the FFI artifacts you can build and test on the Mac are
+`aarch64-apple-darwin` only. That is fine for `smoke.c`, ASan and TSan, which check the
+contract rather than the shipped binary — but it means **the artifacts that actually ship
+have never been run on this machine**, and the packaged-`.nupkg` check below is the only
+thing that exercises them.
 
 Include a job that runs the **packaged**-crate check, not `cargo publish --dry-run`:
 
@@ -551,6 +562,17 @@ The dry-run passed cleanly on 0.1.0 while three defects shipped, because its ver
 only builds the lib — it never builds or runs tests and never checks that licence or readme
 files exist. Same trap, and NuGet's `runtimes/{rid}/native/` layout fails the same way: packs
 clean, breaks on the consumer's machine, no build error.
+
+For the .NET package the equivalent check is to **consume the packed `.nupkg` from a clean
+throwaway project on each RID claimed** — `win-x64` on a Windows runner, `linux-x64` on a
+Linux one — and actually call `tk_mdpos_render` through P/Invoke. `dotnet pack` succeeding
+proves nothing about whether the native asset resolves. Since the shipped binaries cannot be
+built or run on the development Mac at all, this job is the *only* place they are ever
+executed before a user gets them.
+
+`DllImport("tk_mdpos")` resolves `tk_mdpos.dll` and `libtk_mdpos.so` automatically on modern
+.NET, so no per-platform naming is needed in the C# wrapper. That is the `tk-` convention
+reaching into the C ABI paying off.
 
 ### Two things deliberately left out
 
