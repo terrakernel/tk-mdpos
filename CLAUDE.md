@@ -204,23 +204,32 @@ backends, a CLI, golden tests.
 that print, so these are now open questions rather than blocked ones. QR has since been built;
 the rest still need deciding on their merits, one at a time.
 
-Out — not "later," but *not decided*: WASM, barcodes/bitmaps, profile registry or TOML
-loading, data interpolation of any kind, web services, Star/ZPL/TSPL dialects, publishing the
-conformance corpus.
+Out — not "later," but *not decided*: WASM, barcodes, profile registry or TOML loading, data
+interpolation of any kind, web services, Star/ZPL/TSPL dialects, publishing the conformance
+corpus.
 
-**`tk-mdpos-ffi` is an exception, built at the user's explicit direction ahead of the §12 gate.**
-`INSTRUCTIONS.md` §2 still lists FFI as out of scope; that document has not been amended. The
-concern raised at the time and overruled: an ABI is a compatibility anchor, so the `Op` IR and
-the template syntax are now harder to change if a real print shows the layout engine is wrong.
-Nothing has been printed on hardware yet. Treat the C ABI as provisional until it has.
+**Images are settled and need no code: they go through `{raw}`.** See "Images" below. Do not
+propose an `{image}` directive, a decoder, or a ditherer.
 
-Do not add any of these opportunistically, and do not add scaffolding "so it's ready later."
-None of it can be evaluated until the layout engine exists and is known to be good.
+**`tk-mdpos-ffi` was built at the user's explicit direction ahead of the §12 gate.**
+`INSTRUCTIONS.md` §2 still lists FFI as out of scope and has not been amended, so that document
+and the repository disagree — as they now also do about QR and images. The concern raised at the
+time was that an ABI is a compatibility anchor which would make the `Op` IR hard to change if a
+real print showed the layout engine was wrong. **That print has since happened and the engine
+was right**, so the concern is discharged and the C ABI is no longer provisional.
 
-`{raw HEX}` is the exception that is genuinely in scope. It is load-bearing, not a hack: clone
-printers (Xprinter, Rongta, EPPOS, Gainscha — the actual installed base) deviate on cut variants,
-`ESC $` handling, and native QR, and that is unfixable in principle. It costs one `Op` variant
-and it means a vendor quirk never blocks a release.
+Do not add any of the remaining items opportunistically, and do not add scaffolding "so it's
+ready later." Decide each on its own merits rather than because it is adjacent to something
+that already exists.
+
+`{raw HEX}` is load-bearing, not a hack, and it now carries more weight than it was designed
+for: it is both the escape hatch for a vendor quirk that would otherwise block a release, and
+the entire image mechanism. It costs one `Op` variant.
+
+Note its justification has changed. It was originally argued from clone-printer deviation
+(Xprinter, Rongta, EPPOS, Gainscha — "the actual installed base"). Clones are no longer chased,
+so the argument is now simply that a caller sometimes needs to put bytes on the wire that this
+crate has no opinion about. That is not a claim of clone support.
 
 ---
 
@@ -242,6 +251,36 @@ rather than "we support clones."
 
 The printer answers `DLE EOT` normally, so a caller that wants status polling can have it — it
 is still not this library's job.
+
+## Images
+
+Decided 2026-08-15, after a printed test sheet. Images reach the printer as `GS v 0` raster
+bytes inside `{raw HEX}`. **There is no `{image}` directive and there should not be one.** The
+audience is developers, so pre-processing is theirs: 1-bit conversion, dithering, padding width
+to a multiple of 8, and building the `xL xH yL yH` header.
+
+Three alternatives were considered and rejected. The reasons matter more than the outcome:
+
+- **NV logo slots (`{logo N}`)** — recommended first and rejected, because a printer may be
+  shared with non-POS uses. The objection is stronger than it first appears: a logo in printer
+  flash is *per-device state set at install time*, which contradicts the constraint that every
+  document begins with `ESC @` and assumes nothing about prior device state. Check
+  recommendations against §1 before making them.
+- **A caller-supplied asset map** (`render_with(template, profile, assets)`) — workable without
+  breaking the existing signature, but unnecessary API surface when a caller can prepend the
+  bytes itself.
+- **A `Profile.max_document_bytes` limit** — rejected because `{raw}` cannot amplify (two hex
+  characters become one byte), so it is not a safety feature, and the caller already holds the
+  returned `Vec<u8>` and can check `len()` in code that knows its own transport. Revisit only
+  if templates become end-user-editable, where the author and the operator stop being the same
+  person.
+
+**Layout applies justification to a `{raw}` block and does nothing else to it.** That was a fix
+(55be1ae), not the original behavior: `{center}` directly above a `{raw}` used to emit nothing,
+so an image sat flush left while the template asked for centering, and it only appeared to work
+when a printed line above happened to leave `ESC a` set. Everything else in the payload is
+passed through unexamined — including a wrong `xL`/`xH` header, which is the classic ESC/POS
+image bug and prints as a diagonal smear that reads as a hardware fault.
 
 ## Decisions made while adding QR (v0.2)
 
