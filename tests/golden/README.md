@@ -50,6 +50,17 @@ These cover the four places `INSTRUCTIONS.md` §5 predicts the layout engine wil
   that is *not* the first one, so continuation lines have somewhere wrong to go.
 - `004-right-align-no-wrap` — overflow in a `:r` column is an error, not a wrap.
 
+Added with QR support in v0.2:
+
+- `005-qr-payment` — a receipt ending in a centered payment code. The payload is a
+  QRIS-shaped string with obviously fake identifiers, at 206 bytes, which is
+  representative of the real thing: version 10, 65 modules including the quiet zone, 390
+  dots at the default module size. The preview draws the symbol at its true printed
+  width, so this fixture pins the geometry as well as the bytes.
+- `006-qr-too-wide` — the same payload at `{qrmod 9}`, needing 585 dots against 576. A
+  clipped payment code is unscannable, so this is a refusal for the same reason
+  `004` is.
+
 ## Still missing
 
 A unicode fixture, which is the one §5.3 asks for. It is blocked on the CP437 high range

@@ -108,8 +108,50 @@ fn emit_op(op: &Op, profile: &Profile, out: &mut Vec<u8>) -> Result<(), Error> {
         }
 
         Op::Raw(bytes) => out.extend_from_slice(bytes),
+
+        Op::Qr { data, module } => emit_qr(data, *module, out),
     }
     Ok(())
+}
+
+/// `GS ( k` — the two-dimensional symbol family.
+///
+/// Four calls, in this order: select model, set module size, set error correction, store
+/// the payload, then print. Each is `GS ( k pL pH cn fn [parameters]`, where `pL + pH*256`
+/// counts the bytes from `cn` onward and `cn = 49` selects the QR family.
+///
+/// The payload is written as UTF-8 rather than through the profile's code page. QR byte
+/// mode carries opaque bytes and scanners decode them as UTF-8, so this is the one place
+/// a non-ASCII character reaches the printer without [`encode_text`] having a say.
+fn emit_qr(data: &str, module: u8, out: &mut Vec<u8>) {
+    /// `cn` for the QR code family.
+    const QR: u8 = 49;
+
+    fn header(out: &mut Vec<u8>, body_len: usize) {
+        out.extend_from_slice(&[GS, 0x28, 0x6B, (body_len & 0xFF) as u8, (body_len >> 8) as u8]);
+    }
+
+    // fn 65 — select model 2 (the universally supported one); the trailing 0 is unused.
+    header(out, 4);
+    out.extend_from_slice(&[QR, 65, 50, 0]);
+
+    // fn 67 — module size in dots.
+    header(out, 3);
+    out.extend_from_slice(&[QR, 67, module]);
+
+    // fn 69 — error correction. 48..=51 is L/M/Q/H; see `qr` for why M is fixed.
+    header(out, 3);
+    out.extend_from_slice(&[QR, 69, 49]);
+
+    // fn 80 — store the payload in the symbol buffer. The body is cn, fn, m, then data.
+    let bytes = data.as_bytes();
+    header(out, bytes.len() + 3);
+    out.extend_from_slice(&[QR, 80, 48]);
+    out.extend_from_slice(bytes);
+
+    // fn 81 — print what was stored. Advances the paper on its own, so no LF follows.
+    header(out, 3);
+    out.extend_from_slice(&[QR, 81, 48]);
 }
 
 /// Encode text into the profile's code page.
@@ -190,5 +232,55 @@ mod tests {
     fn non_ascii_is_rejected_not_replaced() {
         let err = emit(&[Op::Text("café".into())], &Profile::epson_80mm()).unwrap_err();
         assert_eq!(err, Error::Unrepresentable { ch: 'é' });
+    }
+
+    #[test]
+    fn qr_emits_the_five_gs_paren_k_calls_in_order() {
+        let bytes = ops_only(&[Op::Qr {
+            data: "HI".into(),
+            module: 6,
+        }]);
+
+        #[rustfmt::skip]
+        let want = vec![
+            0x1D, 0x28, 0x6B, 0x04, 0x00, 49, 65, 50, 0,  // model 2
+            0x1D, 0x28, 0x6B, 0x03, 0x00, 49, 67, 6,      // module size 6
+            0x1D, 0x28, 0x6B, 0x03, 0x00, 49, 69, 49,     // error correction M
+            0x1D, 0x28, 0x6B, 0x05, 0x00, 49, 80, 48, b'H', b'I', // store "HI"
+            0x1D, 0x28, 0x6B, 0x03, 0x00, 49, 81, 48,     // print
+        ];
+        assert_eq!(bytes, want);
+    }
+
+    #[test]
+    fn qr_store_length_is_little_endian_across_the_256_byte_boundary() {
+        // pL/pH count the payload plus cn, fn and m. At 253 bytes of data the body is
+        // exactly 256, which is where a byte-order mistake stops being invisible.
+        let bytes = ops_only(&[Op::Qr {
+            data: "A".repeat(253),
+            module: 4,
+        }]);
+        let store = bytes
+            .windows(5)
+            .find(|w| w[0] == 0x1D && w[1] == 0x28 && w[2] == 0x6B && w[3] == 0x00)
+            .expect("a store call with pL == 0");
+        assert_eq!(store[3], 0x00, "pL");
+        assert_eq!(store[4], 0x01, "pH — 256 bytes, not 1");
+    }
+
+    #[test]
+    fn qr_payload_bypasses_the_code_page() {
+        // `é` has no CP437 mapping in this build and `Op::Text` rejects it, but a QR
+        // carries opaque bytes, so the same character must survive as UTF-8 here.
+        assert!(emit(&[Op::Text("é".into())], &Profile::epson_80mm()).is_err());
+
+        let bytes = ops_only(&[Op::Qr {
+            data: "é".into(),
+            module: 6,
+        }]);
+        assert!(
+            bytes.windows(2).any(|w| w == "é".as_bytes()),
+            "payload should appear as UTF-8"
+        );
     }
 }

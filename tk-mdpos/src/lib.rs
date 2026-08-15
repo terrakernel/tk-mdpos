@@ -47,6 +47,7 @@ pub mod ir;
 pub mod layout;
 pub mod parse;
 pub mod profile;
+pub mod qr;
 
 pub use error::Error;
 pub use ir::{Align, CutKind, Op};

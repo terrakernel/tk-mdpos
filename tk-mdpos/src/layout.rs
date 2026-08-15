@@ -38,6 +38,7 @@ use unicode_width::UnicodeWidthChar;
 use crate::ir::{Align, CutKind, Op};
 use crate::parse::{Block, Cell, ColSpec, Node, Span};
 use crate::profile::Profile;
+use crate::qr;
 use crate::Error;
 
 /// Lines fed before the closing cut when the template does not end with one itself.
@@ -75,6 +76,7 @@ struct Engine<'a> {
     justify: Align,
     mag: (u8, u8),
     cols: Option<Vec<ColSpec>>,
+    qr_module: u8,
 
     // Mirrors of device state, so redundant ops are never emitted. Initial values are
     // what `ESC @` leaves behind, which the emitter always sends first.
@@ -91,6 +93,7 @@ impl<'a> Engine<'a> {
             justify: Align::Left,
             mag: (1, 1),
             cols: None,
+            qr_module: qr::DEFAULT_MODULE,
             dev_justify: Align::Left,
             dev_mag: (1, 1),
             dev_attrs: Attrs::default(),
@@ -118,6 +121,9 @@ impl<'a> Engine<'a> {
             Block::Feed(n) => self.ops.push(Op::Feed(*n)),
             Block::Cut => self.ops.push(Op::Cut(CutKind::Partial)),
             Block::Raw(bytes) => self.ops.push(Op::Raw(bytes.clone())),
+
+            Block::QrModule(n) => self.qr_module = *n,
+            Block::Qr(data) => self.qr(line, data)?,
 
             Block::Blank => {
                 self.set_attrs(Attrs::default());
@@ -165,6 +171,48 @@ impl<'a> Engine<'a> {
             self.glyphs(&line);
             self.text("\n");
         }
+    }
+
+    // --- qr --------------------------------------------------------------------------
+
+    /// A QR symbol. Block-level: it occupies its own line and is never a cell.
+    ///
+    /// Placement is delegated to the device exactly as [`plain`](Self::plain) does it —
+    /// `GS ( k` prints through the line buffer, so `ESC a` centers the symbol and no dot
+    /// arithmetic is needed here. That was confirmed on hardware rather than assumed.
+    ///
+    /// Magnification is deliberately not applied: `GS !` does not scale a QR, whose size
+    /// comes from its own module-size parameter. `{size 2x2}` around a `{qr}` is a no-op
+    /// on the symbol, which is why the grid is not consulted.
+    fn qr(&mut self, line: usize, data: &str) -> Result<(), Error> {
+        // The payload is measured in UTF-8 bytes because that is what goes into the
+        // symbol — QR byte mode is opaque bytes, not code-page characters.
+        let bytes = data.len();
+        let available = self.profile.width_dots;
+
+        let needed = qr::footprint_dots(bytes, self.qr_module).ok_or(Error::QrTooLong {
+            line,
+            bytes,
+            max_bytes: qr::max_bytes(),
+        })?;
+        if needed > available {
+            return Err(Error::QrTooWide {
+                line,
+                module: self.qr_module,
+                needed_dots: needed,
+                available_dots: available,
+            });
+        }
+
+        self.set_justify(self.justify);
+        // Emphasis cannot reach a QR, but leaving the device mid-attribute across a
+        // block-level element is the habit that produces receipts printed entirely bold.
+        self.set_attrs(Attrs::default());
+        self.ops.push(Op::Qr {
+            data: data.to_string(),
+            module: self.qr_module,
+        });
+        Ok(())
     }
 
     // --- column rows ---------------------------------------------------------------
@@ -707,5 +755,106 @@ mod tests {
             ),
             Err(Error::ColumnsTooWide { .. })
         ));
+    }
+
+    // --- qr ---------------------------------------------------------------------------
+
+    #[test]
+    fn qr_uses_the_default_module_and_current_justification() {
+        assert_eq!(
+            body("{center}\n{qr https://terrakernel.com}"),
+            vec![
+                Op::Justify(Align::Center),
+                Op::Qr {
+                    data: "https://terrakernel.com".into(),
+                    module: qr::DEFAULT_MODULE,
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn qrmod_is_sticky_across_symbols() {
+        let ops = body("{qrmod 4}\n{qr ONE}\n{qr TWO}");
+        assert_eq!(
+            ops,
+            vec![
+                Op::Qr {
+                    data: "ONE".into(),
+                    module: 4
+                },
+                Op::Qr {
+                    data: "TWO".into(),
+                    module: 4
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_qr_too_wide_for_the_paper_is_rejected() {
+        // 210 bytes is version 10 — 57 modules plus 8 of quiet zone, which needs 585 dots
+        // at module 9 against 576 available.
+        let payload = "A".repeat(210);
+        let err = err(&format!("{{qrmod 9}}\n{{qr {payload}}}"));
+        assert!(
+            matches!(
+                err,
+                Error::QrTooWide {
+                    line: 2,
+                    module: 9,
+                    needed_dots: 585,
+                    available_dots: 576,
+                }
+            ),
+            "{err}"
+        );
+
+        // The same payload one module size down fits, so the check is not just refusing
+        // everything large.
+        assert!(ops(&format!("{{qrmod 8}}\n{{qr {payload}}}"))
+            .iter()
+            .any(|op| matches!(op, Op::Qr { .. })));
+    }
+
+    #[test]
+    fn a_payload_past_version_40_is_rejected() {
+        let err = err(&format!("{{qr {}}}", "A".repeat(2400)));
+        assert!(
+            matches!(
+                err,
+                Error::QrTooLong {
+                    line: 1,
+                    bytes: 2400,
+                    ..
+                }
+            ),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn qr_is_measured_in_utf8_bytes_not_characters() {
+        // A QR carries opaque bytes, so a 3-byte character costs three of the budget.
+        // Measuring in `chars()` here would under-count and let an overflowing symbol
+        // through — the one number in this file that is deliberately not a display width.
+        let ast = parse("{qrmod 16}\n{qr 日本語}").unwrap();
+        let ops = layout(&ast, &Profile::epson_80mm()).unwrap();
+        let Some(Op::Qr { data, .. }) = ops.iter().find(|o| matches!(o, Op::Qr { .. })) else {
+            panic!("expected a QR op");
+        };
+        assert_eq!(data.len(), 9);
+        assert_eq!(data.chars().count(), 3);
+    }
+
+    #[test]
+    fn qr_size_is_independent_of_magnification() {
+        // `GS !` does not scale a symbol, so `{size 2x2}` must not change the op at all.
+        let plain = body("{qr HELLO}");
+        let doubled: Vec<Op> = body("{size 2x2}\n{qr HELLO}")
+            .into_iter()
+            .filter(|op| !matches!(op, Op::Size { .. }))
+            .collect();
+        assert_eq!(plain, doubled);
     }
 }

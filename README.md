@@ -123,6 +123,8 @@ The CLI uses `Profile::epson_80mm()`. There is no profile flag yet.
 | `---` | Full-width rule. Three or more dashes, alone on the line. |
 | `{feed N}` | Feed N lines. |
 | `{cut}` | Partial cut. |
+| `{qr DATA}` | QR symbol on its own line. Honors the current justification. |
+| `{qrmod N}` | QR module size in dots, 1–16. Sticky. Default 6. |
 | `{raw 1D564200}` | Hex passthrough. Spaces allowed: `{raw 1D 56 42 00}`. |
 | `**text**` | Bold. |
 | `__text__` | Underline. |
@@ -136,6 +138,35 @@ Every document is self-contained: it begins with `ESC @`, ends with a feed and a
 assumes nothing about the printer's prior state. A thermal printer is a stateful
 interpreter — leave emphasis on and the *next* receipt prints bold until someone power
 cycles it.
+
+## QR codes
+
+```
+{center}
+Scan untuk membayar
+{qr 00020101021226610014COM.EXAMPLE.WWW...6304ABCD}
+```
+
+The **printer** generates the symbol — this crate never encodes one, which is why it still
+has no dependency beyond `unicode-width`. What it does compute is the finished symbol's
+width, so a code too wide for the paper is rejected rather than printed clipped and
+unscannable.
+
+Four things to know, none of which are worked around:
+
+- **Error correction is fixed at level M.** Right for payment codes and assumed by QRIS.
+  There is no knob.
+- **Sizing is an upper bound.** Capacity is calculated for byte mode, the most expensive
+  encoding; the printer may pick a cheaper one for a numeric payload and produce a smaller
+  symbol than predicted. So a template within a few dots of the paper edge may be rejected
+  even though it would have fit. The error is always in that direction, never the other.
+- **The quiet zone counts.** Epson prints the symbol at its bare module dimensions, so the
+  4-module margin per side is included in the width check.
+- **Payloads are UTF-8 and bypass the code page.** QR byte mode carries opaque bytes, so a
+  `{qr}` may contain characters a text line currently cannot (see **Status**).
+
+`{size}` does not scale a QR — magnification is a text command and has no effect on the
+symbol. Use `{qrmod}`.
 
 ## Four things that will bite you
 
@@ -359,10 +390,15 @@ hand-written C ABI is probably still the better trade — but make that call del
 
 ## Clone printers
 
-`{raw HEX}` is an escape hatch, not a hack. Clone printers — Xprinter, Rongta, EPPOS,
-Gainscha — have no specification, and their deviations cluster in cut variants, `ESC $`
-handling, and native QR. That is unfixable in principle, so `{raw}` means a vendor-specific
-cut or drawer kick never blocks on a release.
+**Genuine Epson is the target.** Clone printers — Xprinter, Rongta, EPPOS, Gainscha — have
+no specification, and their deviations cluster in exactly the places that cannot be probed
+for: cut variants, `ESC $` handling, and native QR. Chasing them means an open-ended bug
+surface and compatibility claims nobody can falsify, so this crate emits the Epson command
+and stops. No fallbacks, no per-vendor branches.
+
+`{raw HEX}` remains an escape hatch, and it is not a hack — it means a vendor-specific cut
+or drawer kick never blocks a release. But it puts the quirk in the caller's hands
+deliberately; it is not a claim of clone support.
 
 Note that "standard ESC/POS" is not a standard. It is Epson's proprietary command set,
 copied to varying degrees, with no spec body and no certification. Compatibility claims
@@ -377,19 +413,25 @@ redeploy cycle, the entire premise of this library collapses.
 
 ## Status
 
-v0.1. The pipeline is complete end to end and covered by unit tests and golden fixtures.
+The pipeline is complete end to end, covered by unit tests and golden fixtures, and
+**verified on real hardware**: an Epson TM-T82X over port 9100, printing right-aligned
+prices flush to the margin, a double-width centered header, wrapped product names, a
+magnified total row, a scannable payment QR, and a clean cut — with no recompilation
+between template edits.
 
 Known limitations:
 
 - **Non-ASCII text is rejected**, not mangled. The CP437 high range (0x80–0xFF) is not
   mapped yet, so `café` returns an error rather than printing wrong. Width *measurement* is
-  already `unicode-width` throughout.
+  already `unicode-width` throughout. QR payloads are exempt — they go out as UTF-8.
+- **QR error correction is fixed at M**, and symbol sizing is a deliberate upper bound.
+  See *QR codes* above.
 - One built-in profile (80mm, Font A, Epson). No profile registry or TOML loading.
-- Not yet verified against real hardware.
+- **Genuine Epson is the target.** Clone printers are not chased; see *Clone printers*.
 
-Out of scope for v0.1, and not merely deferred: WASM, QR codes, barcodes, images, data
-interpolation, and the Star, ZPL, and TSPL dialects. None of them can be evaluated sensibly
-until the layout engine has proven itself in print.
+Out of scope, and not merely deferred: WASM, barcodes, images, data interpolation, and the
+Star, ZPL, and TSPL dialects. Each gets decided on its own merits rather than added because
+it is adjacent to something that already exists.
 
 ## Development
 

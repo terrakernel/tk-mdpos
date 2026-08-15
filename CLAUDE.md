@@ -27,6 +27,7 @@ tk-mdpos/                  # core lib — no I/O, no async; deps: unicode-width 
     layout.rs              # Block AST + Profile -> Vec<Op>   done, unit-tested — the product
     ir.rs                  # Op, Align, CutKind               done
     profile.rs             # Profile, Dialect, Font, CodePage done
+    qr.rs                  # QR symbol geometry only          done, unit-tested
     error.rs               # Error, with source line numbers  done
     emit/escpos.rs         # Vec<Op> -> Vec<u8>               done, unit-tested
     emit/preview.rs        # Vec<Op> -> String (monospace)    done, unit-tested
@@ -35,13 +36,13 @@ tk-mdpos-cli/              # thin binary, owns all file I/O; installs as `mdpos`
 tk-mdpos-ffi/              # C ABI — cdylib + staticlib, both named libtk_mdpos
   include/tk_mdpos.h       # hand-written header, kept in step with src/lib.rs
   tests/smoke.c            # links the real staticlib; not part of cargo test
-tests/golden/              # 4 fixtures, structured as if publishable
+tests/golden/              # 6 fixtures, structured as if publishable
 ```
 
-The v0.1 pipeline is complete end to end: a template file renders to bytes and to a preview.
-What remains before §12 can be claimed is a print on real hardware, and the CP437 high range
-in `emit::escpos::encode_text` (non-ASCII is currently rejected, which is also what blocks the
-unicode golden fixture).
+The v0.1 pipeline is complete end to end and **§12 has been claimed** — see "Hardware" below.
+QR followed it. What remains outstanding is the CP437 high range in `emit::escpos::encode_text`
+(non-ASCII in *text* is currently rejected, which is also what blocks the unicode golden
+fixture; QR payloads are unaffected and go out as UTF-8).
 
 Keep the workspace split. The moment `tk-mdpos` gains a dependency that touches the filesystem,
 §1.1 is already lost. `serde` is an optional feature used only to deserialize fixture profiles;
@@ -199,7 +200,11 @@ Concentrated in `layout.rs`. In rough order of how often they bite:
 v0.1 is deliberately small: one hardcoded 80mm Epson profile, the syntax subset in §4, two
 backends, a CLI, golden tests.
 
-Out — not "later," but *not decided*: WASM, QR/barcode/bitmaps, profile registry or TOML
+**The §12 gate passed on 2026-08-15** — see "Hardware" below. The deferred list was gated on
+that print, so these are now open questions rather than blocked ones. QR has since been built;
+the rest still need deciding on their merits, one at a time.
+
+Out — not "later," but *not decided*: WASM, barcodes/bitmaps, profile registry or TOML
 loading, data interpolation of any kind, web services, Star/ZPL/TSPL dialects, publishing the
 conformance corpus.
 
@@ -216,6 +221,61 @@ None of it can be evaluated until the layout engine exists and is known to be go
 printers (Xprinter, Rongta, EPPOS, Gainscha — the actual installed base) deviate on cut variants,
 `ESC $` handling, and native QR, and that is unfixable in principle. It costs one `Op` variant
 and it means a vendor quirk never blocks a release.
+
+---
+
+## Hardware
+
+**§12 passed on 2026-08-15.** An acceptance template printed correctly on an Epson TM-T82X
+(80mm, network, port 9100): right-aligned prices flush at column 48, a 2x2 centered header,
+long names wrapping with a hanging indent, a 2x2 `TOTAL` row, and a clean partial cut. The
+`ESC $` arithmetic was checked by hand against the hexdump before printing rather than trusted
+from the preview. Nothing in the layout engine turned out to be wrong, which is what makes the
+`Op` IR and the C ABI safe to treat as settled.
+
+**Target is genuine Epson. Clone printers are explicitly not chased** (Julian, same day).
+CLAUDE.md previously weighted Xprinter/Rongta/EPPOS/Gainscha as "the actual installed base";
+that is no longer a design input. Emit the Epson command and stop — no probes, no fallbacks, no
+per-vendor branches. This matters most for native QR, the single largest clone deviation area.
+`{raw HEX}` stays, but its justification is now "vendor quirks are the caller's problem"
+rather than "we support clones."
+
+The printer answers `DLE EOT` normally, so a caller that wants status polling can have it — it
+is still not this library's job.
+
+## Decisions made while adding QR (v0.2)
+
+- **The printer encodes, we only size.** `GS ( k` takes the payload and generates the symbol,
+  so there is no encoder, no bitmap, and no new dependency. All `qr.rs` owns is the byte-mode
+  version table, because layout needs the printed width in advance to reject an overflowing
+  template.
+- **Sizing is a deliberate upper bound.** Capacities are byte-mode, the most expensive of the
+  four modes, and the printer picks the mode itself. A numeric payload may produce a smaller
+  symbol than predicted, so the engine occasionally rejects a template that would have fit.
+  That is the safe direction and it only bites within a few dots of the paper edge.
+- **The quiet zone counts against the paper.** Epson prints the symbol at its bare module
+  dimensions, so the 4-module margin per side is added to the footprint here. A code flush to
+  the paper edge scans badly.
+- **Error correction is fixed at M.** Right for payment codes, assumed by QRIS, and it keeps
+  the capacity table one column instead of four. An EC knob means adding L/Q/H and threading
+  the level through `Op::Qr` — the shape is ready, the knob is deliberately not shipped.
+- **QR payloads bypass the code page.** `Op::Text` rejects non-ASCII until the CP437 high range
+  exists, but QR byte mode carries opaque bytes that scanners read as UTF-8. So a `{qr}` may
+  legally contain characters a text line may not, and the payload is measured in *bytes* — the
+  one width in the engine that is deliberately not `unicode-width`.
+- **`GS !` does not scale a QR.** Magnification is not consulted, so `{size 2x2}` around a
+  `{qr}` is a no-op on the symbol. There is a test pinning that.
+- **The directive scanner became escape-aware.** `{qr}` is the only directive whose payload can
+  contain `}`. The scan is shared rather than special-cased on the name, which would mean
+  sniffing the name before knowing where the directive ends. No *valid* v1 template is affected
+  — no other directive accepts a backslash — and the four pre-existing golden fixtures were
+  byte-identical afterwards, which is the evidence.
+- **QR is block-level and never a cell.** It occupies its own line and honors `{center}` through
+  `ESC a`, exactly as a plain line does. Confirmed on hardware, not assumed: `GS ( k` prints
+  through the line buffer and advances the paper by itself, so no trailing `LF` is emitted.
+- **The preview draws a box at the symbol's true width**, three lines tall regardless of real
+  height. Height is not something layout can get wrong — nothing shares a line with a QR —
+  and width is, so width is to scale.
 
 ---
 

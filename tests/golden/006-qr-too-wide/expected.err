@@ -1,0 +1,1 @@
+line 5: QR symbol needs 585 dots at module size 9 but only 576 are available; reduce `{qrmod}` or shorten the payload

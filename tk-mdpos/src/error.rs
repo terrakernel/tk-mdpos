@@ -48,6 +48,23 @@ pub enum Error {
     },
     /// `{raw ...}` payload was not valid hex, or had odd length.
     BadHex { line: usize, detail: String },
+    /// A QR symbol would be wider than the paper at its module size.
+    ///
+    /// Rejected for the same reason a right-aligned column never wraps: a clipped QR is
+    /// unscannable, and on a payment code that is a lost sale rather than a cosmetic
+    /// defect. The fix is a smaller `{qrmod}` or a shorter payload.
+    QrTooWide {
+        line: usize,
+        module: u8,
+        needed_dots: u16,
+        available_dots: u16,
+    },
+    /// A QR payload exceeds what a version-40 symbol can carry.
+    QrTooLong {
+        line: usize,
+        bytes: usize,
+        max_bytes: u16,
+    },
     /// A character has no representation in the profile's code page.
     Unrepresentable { ch: char },
 }
@@ -97,6 +114,25 @@ impl fmt::Display for Error {
             Error::BadHex { line, detail } => {
                 write!(f, "line {line}: bad `{{raw}}` payload: {detail}")
             }
+            Error::QrTooWide {
+                line,
+                module,
+                needed_dots,
+                available_dots,
+            } => write!(
+                f,
+                "line {line}: QR symbol needs {needed_dots} dots at module size {module} \
+                 but only {available_dots} are available; reduce `{{qrmod}}` or shorten the payload"
+            ),
+            Error::QrTooLong {
+                line,
+                bytes,
+                max_bytes,
+            } => write!(
+                f,
+                "line {line}: QR payload is {bytes} bytes, over the {max_bytes}-byte ceiling \
+                 for a version-40 symbol"
+            ),
             Error::Unrepresentable { ch } => {
                 write!(f, "character {ch:?} has no encoding in the target code page")
             }

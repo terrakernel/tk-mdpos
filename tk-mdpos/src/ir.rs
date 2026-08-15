@@ -38,7 +38,21 @@ pub enum Op {
     /// Raw byte passthrough. The escape hatch for clone-printer quirks; see
     /// `INSTRUCTIONS.md` §7 for why this is load-bearing rather than a hack.
     Raw(Vec<u8>),
-    // v0.2+: Qr { .. }, Barcode { .. }, Image { .. }
+    /// A QR symbol the *printer* generates from `data`.
+    ///
+    /// Post-layout like every other variant: by the time this exists, layout has already
+    /// checked the symbol fits the paper at this module size. Emitters may print it
+    /// without re-deriving anything.
+    ///
+    /// `data` is emitted as UTF-8 and deliberately bypasses the profile's code page — QR
+    /// byte mode carries opaque bytes and scanners decode them as UTF-8, so a payload may
+    /// contain characters that [`Op::Text`] would reject.
+    ///
+    /// Horizontal placement comes from the preceding [`Op::Justify`], since the symbol
+    /// goes through the printer's line buffer like text does. It advances the paper by
+    /// itself, so no trailing newline is implied.
+    Qr { data: String, module: u8 },
+    // v0.2+: Barcode { .. }, Image { .. }
 }
 
 /// Horizontal justification.

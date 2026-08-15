@@ -22,6 +22,7 @@
 //! for a backslash itself.
 
 use crate::ir::Align;
+use crate::qr;
 use crate::Error;
 
 /// A parsed block with the source line it came from, for error reporting.
@@ -54,6 +55,11 @@ pub enum Block {
     Cut,
     /// `{raw 1D564200}` — already hex-decoded.
     Raw(Vec<u8>),
+    /// `{qr DATA}` — a QR symbol. The payload is stored verbatim, with `\` escapes
+    /// already resolved; the printer encodes it, so the parser does not care what it says.
+    Qr(String),
+    /// `{qrmod N}` — QR module size in dots, 1..=16. Sticky, like `{size}`.
+    QrModule(u8),
     /// An empty source line. Distinct from a row of empty cells.
     Blank,
     /// A content line. One cell when no `{cols}` is active, otherwise split on
@@ -136,7 +142,7 @@ impl Parser {
         // A line may be prefixed by any number of directives: `{center}{size 2x2}Text`.
         let mut had_directive = false;
         while rest.starts_with('{') {
-            let end = rest.find('}').ok_or_else(|| Error::BadDirective {
+            let end = directive_end(rest).ok_or_else(|| Error::BadDirective {
                 line,
                 name: rest.trim_start_matches('{').chars().take(16).collect(),
                 detail: "unterminated directive — missing `}`".into(),
@@ -268,6 +274,27 @@ impl Parser {
 
             "raw" => Ok(Block::Raw(hex(args, line)?)),
 
+            "qr" => {
+                if args.is_empty() {
+                    return Err(bad("expected data, as in `{qr https://example.com}`"));
+                }
+                Ok(Block::Qr(unescape(args)))
+            }
+
+            "qrmod" => {
+                let n: u8 = args
+                    .parse()
+                    .map_err(|_| bad("expected a module size, as in `{qrmod 6}`"))?;
+                if !(qr::MIN_MODULE..=qr::MAX_MODULE).contains(&n) {
+                    return Err(bad(&format!(
+                        "module size must be {}..={}, got {n}",
+                        qr::MIN_MODULE,
+                        qr::MAX_MODULE
+                    )));
+                }
+                Ok(Block::QrModule(n))
+            }
+
             _ => Err(Error::UnknownDirective {
                 line,
                 name: name.to_string(),
@@ -305,6 +332,45 @@ fn col_spec(part: &str, bad: &dyn Fn(&str) -> Error) -> Result<ColSpec, Error> {
         width_chars,
         align,
     })
+}
+
+/// Index of the `}` that closes a directive, honoring the `\` escape.
+///
+/// Only `{qr}` has a payload arbitrary enough to contain a brace, but the scan is shared
+/// rather than special-cased on the directive name, which would mean sniffing the name
+/// before knowing where the directive ends. This cannot change how any *valid* v1 template
+/// renders: no other directive accepts a backslash in its arguments, so the only templates
+/// affected are ones that were already errors.
+fn directive_end(s: &str) -> Option<usize> {
+    let mut escaped = false;
+    for (i, c) in s.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match c {
+            '\\' => escaped = true,
+            '}' => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Resolve `\` escapes in a directive payload, matching the rule used inside cells.
+fn unescape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => match chars.next() {
+                Some(escaped) => out.push(escaped),
+                None => out.push('\\'),
+            },
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// Decode a `{raw}` payload. Whitespace between bytes is allowed, so `{raw 1D 56 42 00}`
@@ -707,5 +773,47 @@ Es Teh Manis   | 3 x  5.000 | 15.000
             .filter(|n| matches!(n.block, Block::Line(_)))
             .count();
         assert_eq!(rows, 5);
+    }
+
+    #[test]
+    fn qr_payload_keeps_its_internal_spaces() {
+        // Real QRIS payloads carry the merchant name inline, so a payload containing a
+        // space is the normal case rather than an edge one.
+        assert_eq!(
+            blocks("{qr 5910TOKO MAJU6013Jakarta Pusat}"),
+            vec![Block::Qr("5910TOKO MAJU6013Jakarta Pusat".into())]
+        );
+    }
+
+    #[test]
+    fn qr_payload_may_contain_an_escaped_brace() {
+        // The directive scanner has to respect `\` or the payload would end early.
+        assert_eq!(
+            blocks(r#"{qr {\"amount\":5000\}}"#),
+            vec![Block::Qr(r#"{"amount":5000}"#.into())]
+        );
+    }
+
+    #[test]
+    fn qr_without_data_is_rejected() {
+        let err = parse("{qr}").unwrap_err();
+        assert!(matches!(err, Error::BadDirective { line: 1, .. }), "{err}");
+    }
+
+    #[test]
+    fn qrmod_is_range_checked() {
+        assert_eq!(blocks("{qrmod 6}"), vec![Block::QrModule(6)]);
+        assert_eq!(blocks("{qrmod 16}"), vec![Block::QrModule(16)]);
+
+        for bad in ["{qrmod 0}", "{qrmod 17}", "{qrmod x}"] {
+            assert!(parse(bad).is_err(), "{bad} should not parse");
+        }
+    }
+
+    #[test]
+    fn a_directive_may_still_be_unterminated() {
+        // The escape-aware scan must not turn a missing `}` into a silent success.
+        let err = parse("{qr no closing brace").unwrap_err();
+        assert!(matches!(err, Error::BadDirective { line: 1, .. }), "{err}");
     }
 }
