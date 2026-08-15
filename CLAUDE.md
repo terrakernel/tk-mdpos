@@ -31,6 +31,7 @@ tk-mdpos/                  # core lib — no I/O, no async; deps: unicode-width 
     error.rs               # Error, with source line numbers  done
     emit/escpos.rs         # Vec<Op> -> Vec<u8>               done, unit-tested
     emit/preview.rs        # Vec<Op> -> String (monospace)    done, unit-tested
+    emit/html.rs           # Vec<Op> -> String (HTML)         done, unit-tested
   tests/golden.rs          # fixture harness
 tk-mdpos-cli/              # thin binary, owns all file I/O; installs as `mdpos`
 tk-mdpos-ffi/              # C ABI — cdylib + staticlib, both named libtk_mdpos
@@ -315,6 +316,52 @@ image bug and prints as a diagonal smear that reads as a hardware fault.
 - **The preview draws a box at the symbol's true width**, three lines tall regardless of real
   height. Height is not something layout can get wrong — nothing shares a line with a QR —
   and width is, so width is to scale.
+
+## Decisions made while adding the HTML preview backend
+
+Built 2026-08-15 at Julian's direction, on the strength of the §1.2 argument that the IR
+exists to make a third backend possible. It required no change to `parse.rs`, `layout.rs`,
+or `ir.rs` — purely additive, no new dependency.
+
+- **Resemblance is the standard, not pixel fidelity.** Julian's framing: *"we don't have to
+  pixel perfect as this one only a preview."* The justification is stronger than convenience
+  — **the preview is not the safety net for fit.** Layout already wraps `:l`/`:c` overflow
+  and rejects `:r` overflow and an oversized QR, so nothing can silently run off the paper
+  edge in a document that renders at all. That leaves the backend responsible only for the
+  question a person is actually asking. Do not re-litigate this by citing §8; that entry
+  rejects HTML as *input*, which is a different proposal.
+- **Character cells and `ch` units, not dots and pixels.** `ch` *is* a monospace font's
+  advance width, so the grid lands correctly whatever font the browser has. Positioning in
+  dot-derived pixels was considered and dropped: it makes layout depend on the host's font
+  metrics matching a guess, and drift accumulates across a line. This also means the two
+  preview backends resolve `AbsPos` identically and cannot disagree about where a column is.
+- **Vertical is fixed at `2ch` per line**, because there is no printer grid to honor there.
+  Font A's cell is 12x24 dots, so 1:2 is what a receipt looks like. This is the one thing
+  the monospace backend can ignore entirely and paper cannot — `Op::Size.h` is real here.
+- **Nothing is drawn that we are guessing at.** A QR is a correctly-sized empty square and
+  `{raw}` a labelled band. A plausible-looking QR invites someone to point a phone at it and
+  it will not scan; an invented image misreports what `{raw}` contains. The payload goes on
+  a `data-mdpos-qr` attribute so a host with its own encoder can draw the true symbol.
+- **A fragment with a scoped `<style>`, not a document and not inline styles.** The consumer
+  is a WebView or an embedded page, which wants both: renders standalone, cannot be clobbered
+  by host CSS. Inline styles were the first recommendation and were dropped as much larger
+  output for the same collision-immunity.
+- **`preview()` is not superseded.** Different audience: it is the developer's diff tool and
+  the faster loop while editing, and it is what the golden fixtures assert the grid against.
+- **`expected.html` pins positions, not appearance.** Whether it *looks* right is only
+  answerable by opening it next to printed paper. The fixture catches a cell moving or the
+  two previews drifting apart, and claims nothing more.
+
+**The output was confirmed good by Julian on 2026-08-15**, rendered in a browser from
+`mdpos --html`. So the backend is settled, and the condition that watch mode was held behind
+has been met.
+
+**Watch mode (`--html --watch`) is deferred, not rejected, and is now decidable.** It would
+be the clearest demonstration of the whole thesis — edit the template, the receipt updates,
+no compile — and costs one file-watcher dependency in the CLI only, with reload injected by
+the CLI so the core keeps emitting a clean fragment. It was held on the grounds that a watch
+mode over a mediocre preview just shows mediocrity faster; the preview is not mediocre, so
+decide it on its own merits.
 
 ---
 

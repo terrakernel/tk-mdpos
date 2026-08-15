@@ -86,10 +86,26 @@ send_to_printer(&bytes)?;
 Three entry points, all sharing the same parse and layout passes:
 
 ```rust
-tk_mdpos::render(&t, &p)?   // -> Vec<u8>   ESC/POS bytes
-tk_mdpos::preview(&t, &p)?  // -> String    monospace, for showing a user or a test
-tk_mdpos::to_ops(&t, &p)?   // -> Vec<Op>   the IR, for tooling or a custom backend
+tk_mdpos::render(&t, &p)?        // -> Vec<u8>   ESC/POS bytes
+tk_mdpos::preview(&t, &p)?       // -> String    monospace, for a diff or a terminal
+tk_mdpos::preview_html(&t, &p)?  // -> String    HTML, for showing a person
+tk_mdpos::to_ops(&t, &p)?        // -> Vec<Op>   the IR, for tooling or a custom backend
 ```
+
+The two previews have different jobs. `preview` is a developer's diff tool — honest about
+the grid, and blind to everything else. `preview_html` returns one `<div>` carrying its own
+scoped `<style>`, and draws what monospace has to discard: emphasis, underline, and
+magnification at its real size. Embed it in a page or hand it to a WebView.
+
+Its fidelity is resemblance, not pixel accuracy — a browser does not have the printer's ROM
+font. That is enough, because the preview is not what enforces fit: layout already wraps
+`:l`/`:c` overflow and rejects `:r` overflow and an oversized QR, so nothing can silently
+run off the paper edge in a document that renders at all.
+
+A QR draws as a correctly-sized empty square and `{raw}` as a labelled band. Neither is
+given invented artwork: a drawn QR that is not the symbol the printer will generate invites
+someone to scan it. The payload rides on a `data-mdpos-qr` attribute so a host with its own
+QR library can draw the real symbol at the right footprint.
 
 The profile is a plain struct:
 
@@ -106,9 +122,10 @@ font, never hardcoded. `columns_at(2)` gives it under `{size 2x2}`.
 ## CLI
 
 ```sh
-mdpos receipt.tmpl > out.bin      # ESC/POS bytes to stdout — always redirect
-mdpos --preview receipt.tmpl      # monospace preview
-cat receipt.tmpl | mdpos -        # read from stdin
+mdpos receipt.tmpl > out.bin        # ESC/POS bytes to stdout — always redirect
+mdpos --preview receipt.tmpl        # monospace preview
+mdpos --html receipt.tmpl > p.html  # HTML preview; open it in a browser
+cat receipt.tmpl | mdpos -          # read from stdin
 ```
 
 The CLI uses `Profile::epson_80mm()`. There is no profile flag yet.
@@ -492,9 +509,9 @@ UPDATE_GOLDEN=1 cargo test --test golden    # regenerate fixtures, then read the
 ```
 
 Golden fixtures live in `tests/golden/` and are structured as if they will be published —
-they are the seed of a conformance corpus and of a customer-facing compatibility test. Both
-backends snapshot from the same input, which is what keeps the preview honest about what
-the bytes will do.
+they are the seed of a conformance corpus and of a customer-facing compatibility test. All
+three backends snapshot from the same input, which is what keeps the previews honest about
+what the bytes will do.
 
 A changed `expected.bin` is a v1 compatibility break until proven otherwise. Inspect the
 diff by hand.

@@ -83,10 +83,13 @@ fn golden_fixtures() {
             .unwrap_or_else(|e| panic!("{name}: render failed: {e}"));
         let text = tk_mdpos::preview(&template, &profile)
             .unwrap_or_else(|e| panic!("{name}: preview failed: {e}"));
+        let html = tk_mdpos::preview_html(&template, &profile)
+            .unwrap_or_else(|e| panic!("{name}: html preview failed: {e}"));
 
         if updating() {
             std::fs::write(case.join("expected.bin"), &bytes).unwrap();
             std::fs::write(case.join("expected.txt"), &text).unwrap();
+            std::fs::write(case.join("expected.html"), &html).unwrap();
             continue;
         }
 
@@ -107,6 +110,17 @@ fn golden_fixtures() {
                 "{name}: preview differs\n--- expected ---\n{want}--- actual ---\n{text}"
             )),
             Err(e) => failures.push(format!("{name}: expected.txt: {e}")),
+            _ => {}
+        }
+
+        // The HTML backend pins positions and sizes, not appearance. Whether it *looks*
+        // right is only answerable by opening it next to printed paper; what this catches
+        // is the two previews drifting apart, or a cell moving.
+        match std::fs::read_to_string(case.join("expected.html")) {
+            Ok(want) if want != html => failures.push(format!(
+                "{name}: html preview differs\n--- expected ---\n{want}--- actual ---\n{html}"
+            )),
+            Err(e) => failures.push(format!("{name}: expected.html: {e}")),
             _ => {}
         }
     }

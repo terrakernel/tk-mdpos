@@ -8,15 +8,20 @@ NNN-short-name/
   profile.ron     optional; defaults to Profile::epson_80mm()
   expected.bin    ESC/POS bytes
   expected.txt    monospace preview
-  expected.err    instead of the two above: the rejection this template must produce
+  expected.html   HTML preview
+  expected.err    instead of the three above: the rejection this template must produce
 ```
 
 A fixture with `expected.err` asserts that the template is *refused*, matching `Error`'s
 `Display` output. Refusing a template is a feature — a wrapped total is worse than a
 failed render — so the corpus has to pin the refusals too.
 
-Both backends snapshot from the same `input.tmpl`, which is what keeps the preview
+All three backends snapshot from the same `input.tmpl`, which is what keeps the previews
 honest about what the bytes will do.
+
+`expected.html` pins positions and sizes, not appearance. Whether the HTML preview *looks*
+right is only answerable by opening it next to printed paper; what the fixture catches is a
+cell moving, or the two previews drifting apart.
 
 Run with `cargo test --test golden`. Regenerate deliberately:
 

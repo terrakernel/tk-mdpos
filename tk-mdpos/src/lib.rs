@@ -77,6 +77,28 @@ pub fn preview(template: &str, profile: &Profile) -> Result<String, Error> {
     emit::preview::emit(&ops, profile)
 }
 
+/// Render a template to a self-contained HTML fragment, for showing a person what the
+/// paper will look like.
+///
+/// Shares the parse and layout passes with [`render`], for the same reason [`preview`]
+/// does. Where the monospace preview is a developer's diff tool, this one draws what that
+/// backend has to discard — emphasis, underline, and magnification at its real size — so a
+/// receipt layout can be approved without a printer.
+///
+/// The result is one `<div>` carrying its own scoped `<style>`: it can be embedded in a
+/// host page without colliding with it, and it still renders standalone when written to a
+/// file or handed to a WebView.
+///
+/// Fidelity is resemblance, not pixel accuracy — the printer's ROM font is not available
+/// to a browser. That is sufficient because the preview is not what enforces fit: layout
+/// already wraps `:l`/`:c` overflow and rejects `:r` overflow and an oversized QR, so a
+/// document that renders at all cannot run off the paper edge.
+pub fn preview_html(template: &str, profile: &Profile) -> Result<String, Error> {
+    let ast = parse::parse(template)?;
+    let ops = layout::layout(&ast, profile)?;
+    emit::html::emit(&ops, profile)
+}
+
 /// Render a template to the intermediate representation.
 ///
 /// Exposed for tests and tooling. Most callers want [`render`] or [`preview`].

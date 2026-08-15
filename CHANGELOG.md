@@ -9,6 +9,42 @@ API and carries the compatibility promise: the engine may be rewritten freely, b
 template must render identically in perpetuity. A major bump here does not license a change
 in how an existing template prints.
 
+## [Unreleased]
+
+### Added
+
+- **HTML preview backend.** `preview_html()` returns a self-contained fragment — one
+  `<div>` carrying its own scoped `<style>` — so it can be embedded in a host page or
+  handed straight to a WebView. It draws the three things the monospace backend has to
+  discard: emphasis, underline, and magnification at its real printed size. The audience is
+  a person approving a receipt layout, not a developer diffing one; `preview()` remains the
+  faster loop while editing and is what the fixtures assert the grid against.
+
+  Fidelity is resemblance rather than pixel accuracy, since a browser does not have the
+  printer's ROM bitmap font. That is sufficient because the preview does not enforce fit —
+  layout already wraps `:l`/`:c` overflow and rejects `:r` overflow and an oversized QR.
+  Positions are resolved to whole character cells and expressed in `ch` units, so the grid
+  lands correctly whatever monospace font the browser has, and the two previews cannot
+  disagree about where a column starts.
+
+  A QR renders as a correctly-sized empty square and `{raw}` as a labelled band. Neither
+  gets invented artwork: a drawn QR that is not the symbol the printer will generate invites
+  someone to scan it, and a made-up image misreports what `{raw}` contains. The QR payload
+  rides on a `data-mdpos-qr` attribute so a host with its own encoder can draw the real
+  symbol at the right footprint.
+- `tk_mdpos_preview_html` in the C ABI. Unlike byte output the result has no embedded NULs,
+  so hosts may treat it as a C string.
+- `mdpos --html` in the CLI.
+- `expected.html` in every golden fixture. Existing `expected.bin` and `expected.txt` are
+  byte-identical, which is the evidence that nothing in the render path moved.
+
+### Fixed
+
+- `include/tk_mdpos.h` could not be included from C++, despite its `extern "C"` guards:
+  three prototypes named a parameter `template`, which is a keyword there. Renamed to
+  `tmpl`. Parameter names in a prototype are documentation only, so this is not an ABI
+  change.
+
 ## [0.2.0] — 2026-08-15
 
 First release verified against real hardware. An Epson TM-T82X printed right-aligned prices

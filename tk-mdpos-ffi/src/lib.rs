@@ -227,6 +227,30 @@ pub unsafe extern "C" fn tk_mdpos_preview(
     }) }
 }
 
+/// Render a template to a self-contained HTML preview fragment.
+///
+/// Identical contract to [`tk_mdpos_render`]; the buffer holds UTF-8 markup. Unlike the
+/// byte output it contains no embedded NULs, so the terminator is genuinely usable and a
+/// host may treat this one as a C string.
+///
+/// Intended for showing a person what the paper will look like before printing — the
+/// fragment carries its own scoped styles and can be handed straight to a WebView.
+///
+/// # Safety
+///
+/// Same requirements as [`tk_mdpos_render`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tk_mdpos_preview_html(
+    template: *const u8,
+    template_len: usize,
+    profile: *const TkMdposProfile,
+    out: *mut TkMdposBuf,
+) -> i32 {
+    unsafe { call(template, template_len, profile, out, |t, p| {
+        tk_mdpos::preview_html(t, p).map(|s| TkMdposBuf::from_str(&s))
+    }) }
+}
+
 /// Release a buffer produced by this library.
 ///
 /// Safe to call on a zeroed or already-freed buffer, and required even after an error,
@@ -360,6 +384,29 @@ mod tests {
         unsafe { tk_mdpos_free(out) };
 
         assert_eq!(text, tk_mdpos::preview(src, &Profile::epson_80mm()).unwrap());
+    }
+
+    #[test]
+    fn preview_html_matches_the_rust_api() {
+        let src = "{center}\n{size 2x2}TOKO\n{cut}";
+        let profile = tk_mdpos_profile_epson_80mm();
+
+        let mut out = TkMdposBuf::EMPTY;
+        let code = unsafe { tk_mdpos_preview_html(src.as_ptr(), src.len(), &profile, &mut out) };
+        assert_eq!(code, TK_MDPOS_OK);
+
+        let bytes = unsafe { std::slice::from_raw_parts(out.ptr, out.len) };
+        let text = String::from_utf8_lossy(bytes).into_owned();
+        // Markup has no embedded NULs, so unlike byte output a host may treat it as a C
+        // string. That is a promise worth pinning rather than assuming.
+        assert!(!bytes.contains(&0), "HTML must be usable as a C string");
+        assert_eq!(unsafe { *out.ptr.add(out.len) }, 0, "missing NUL terminator");
+        unsafe { tk_mdpos_free(out) };
+
+        assert_eq!(
+            text,
+            tk_mdpos::preview_html(src, &Profile::epson_80mm()).unwrap()
+        );
     }
 
     #[test]

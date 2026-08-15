@@ -84,22 +84,41 @@ uint16_t tk_mdpos_columns(const TkMdposProfile *profile, uint8_t mag);
 /*
  * Render a template to ESC/POS bytes.
  *
- * `template` is UTF-8 of `template_len` bytes and need not be NUL-terminated. On success
- * `out` receives the bytes; on any error it receives a UTF-8 message. Either way `out`
- * must be released with tk_mdpos_free().
+ * `tmpl` is UTF-8 of `tmpl_len` bytes and need not be NUL-terminated. On success `out`
+ * receives the bytes; on any error it receives a UTF-8 message. Either way `out` must be
+ * released with tk_mdpos_free().
+ *
+ * (The parameter is `tmpl` rather than `template` so this header stays includable from
+ * C++, where that word is a keyword. Parameter names are documentation only and carry no
+ * ABI weight.)
  *
  * Returns TK_MDPOS_OK or one of the TK_MDPOS_ERR_* codes.
  */
-int32_t tk_mdpos_render(const uint8_t     *template,
-                     size_t             template_len,
-                     const TkMdposProfile *profile,
-                     TkMdposBuf           *out);
+int32_t tk_mdpos_render(const uint8_t        *tmpl,
+                        size_t                tmpl_len,
+                        const TkMdposProfile *profile,
+                        TkMdposBuf           *out);
 
 /* As tk_mdpos_render(), but the buffer holds a UTF-8 monospace preview. */
-int32_t tk_mdpos_preview(const uint8_t     *template,
-                      size_t             template_len,
-                      const TkMdposProfile *profile,
-                      TkMdposBuf           *out);
+int32_t tk_mdpos_preview(const uint8_t        *tmpl,
+                         size_t                tmpl_len,
+                         const TkMdposProfile *profile,
+                         TkMdposBuf           *out);
+
+/*
+ * As tk_mdpos_render(), but the buffer holds a self-contained UTF-8 HTML fragment showing
+ * what the paper will look like. One <div> carrying its own scoped <style>, so it can be
+ * embedded in a host page or handed straight to a WebView.
+ *
+ * Unlike byte output this contains no embedded NULs, so it may safely be treated as a C
+ * string. Fidelity is resemblance rather than pixel accuracy: the printer's font is not
+ * available to a browser. That is sufficient because the preview does not enforce fit —
+ * overflow is already wrapped or rejected before this is reached.
+ */
+int32_t tk_mdpos_preview_html(const uint8_t        *tmpl,
+                              size_t                tmpl_len,
+                              const TkMdposProfile *profile,
+                              TkMdposBuf           *out);
 
 /*
  * Release a buffer produced by this library. Safe on a zeroed buffer, and required even

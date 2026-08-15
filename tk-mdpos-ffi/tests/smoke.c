@@ -63,6 +63,16 @@ int main(void) {
     check(strstr((const char *)out.ptr, "50.000") != NULL, "preview contains the price");
     tk_mdpos_free(out);
 
+    /* --- html preview --- */
+    code = tk_mdpos_preview_html((const uint8_t *)tmpl, strlen(tmpl), &profile, &out);
+    check(code == TK_MDPOS_OK, "template previews as html");
+    check(strstr((const char *)out.ptr, "<div class=\"mdpos\"") != NULL,
+          "html preview is a scoped fragment");
+    check(strstr((const char *)out.ptr, "TOKO MAJU") != NULL, "html preview has the header");
+    /* Markup has no embedded NULs, so unlike byte output it really is a C string. */
+    check(strlen((const char *)out.ptr) == out.len, "html preview is a valid C string");
+    tk_mdpos_free(out);
+
     /* --- a rejected template must explain itself --- */
     const char *bad = "{cols 20,6:r}\nItem | 1.250.000\n";
     code = tk_mdpos_render((const uint8_t *)bad, strlen(bad), &profile, &out);

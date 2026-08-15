@@ -6,6 +6,7 @@
 //! ```text
 //! mdpos template.txt > out.bin
 //! mdpos --preview template.txt
+//! mdpos --html template.txt > preview.html
 //! ```
 
 use std::io::{self, Read, Write};
@@ -19,8 +20,13 @@ mdpos — render a receipt template to ESC/POS bytes
 USAGE:
     mdpos <template.txt>            write ESC/POS bytes to stdout
     mdpos --preview <template.txt>  write a monospace preview to stdout
+    mdpos --html <template.txt>     write an HTML preview to stdout
 
 Use - as the filename to read the template from stdin.
+
+--preview is the faster loop while editing a template; --html shows emphasis and
+magnification at their real size, for approving a layout or showing someone who is
+not at a terminal. Redirect it to a file and open it.
 
 Bytes go to stdout unredirected, which will spray control codes across your
 terminal. Redirect to a file or pipe them to a printer.
@@ -37,12 +43,13 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let mut preview = false;
+    let mut output = Output::Bytes;
     let mut path: Option<String> = None;
 
     for arg in std::env::args().skip(1) {
         match arg.as_str() {
-            "--preview" | "-p" => preview = true,
+            "--preview" | "-p" => output = Output::Preview,
+            "--html" => output = Output::Html,
             "--help" | "-h" => {
                 print!("{USAGE}");
                 return Ok(());
@@ -75,12 +82,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let profile = Profile::epson_80mm();
 
     let mut stdout = io::stdout().lock();
-    if preview {
-        stdout.write_all(tk_mdpos::preview(&template, &profile)?.as_bytes())?;
-    } else {
-        stdout.write_all(&tk_mdpos::render(&template, &profile)?)?;
+    match output {
+        Output::Bytes => stdout.write_all(&tk_mdpos::render(&template, &profile)?)?,
+        Output::Preview => stdout.write_all(tk_mdpos::preview(&template, &profile)?.as_bytes())?,
+        Output::Html => {
+            stdout.write_all(tk_mdpos::preview_html(&template, &profile)?.as_bytes())?
+        }
     }
     stdout.flush()?;
 
     Ok(())
+}
+
+/// Which backend to run. The last flag on the command line wins, which is the ordinary
+/// shell convention and avoids inventing an error for `--preview --html`.
+enum Output {
+    Bytes,
+    Preview,
+    Html,
 }
