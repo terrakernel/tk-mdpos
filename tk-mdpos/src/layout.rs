@@ -120,7 +120,21 @@ impl<'a> Engine<'a> {
 
             Block::Feed(n) => self.ops.push(Op::Feed(*n)),
             Block::Cut => self.ops.push(Op::Cut(CutKind::Partial)),
-            Block::Raw(bytes) => self.ops.push(Op::Raw(bytes.clone())),
+
+            Block::Raw(bytes) => {
+                // Justification is applied even though the payload is opaque. `{raw}` is
+                // how images reach the printer, and `GS v 0` prints through the line
+                // buffer, so `ESC a` is what centers one. Without this a raw block
+                // silently inherited whatever the previous *printed line* left set, and
+                // `{center}` directly above it did nothing at all — confirmed on paper
+                // before it was fixed.
+                //
+                // The cost is three redundant bytes ahead of a payload that turns out to
+                // be a drawer kick. That is a better trade than a template asking to be
+                // centered and not being.
+                self.set_justify(self.justify);
+                self.ops.push(Op::Raw(bytes.clone()));
+            }
 
             Block::QrModule(n) => self.qr_module = *n,
             Block::Qr(data) => self.qr(line, data)?,
@@ -758,6 +772,21 @@ mod tests {
     }
 
     // --- qr ---------------------------------------------------------------------------
+
+    #[test]
+    fn raw_blocks_are_justified_like_anything_else() {
+        // Regression: `{center}` directly above a `{raw}` used to emit nothing, so an
+        // image sat flush left while the template plainly asked for it centered. It only
+        // appeared to work when a printed line above happened to leave `ESC a 1` set.
+        let quirk = vec![0x1D, 0x76, 0x30, 0x00];
+        assert_eq!(
+            body("{center}\n{raw 1D763000}"),
+            vec![Op::Justify(Align::Center), Op::Raw(quirk.clone())]
+        );
+
+        // Still no redundant op when the device is already where the template wants it.
+        assert_eq!(body("{raw 1D763000}"), vec![Op::Raw(quirk)]);
+    }
 
     #[test]
     fn qr_uses_the_default_module_and_current_justification() {

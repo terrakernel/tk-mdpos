@@ -168,6 +168,54 @@ Four things to know, none of which are worked around:
 `{size}` does not scale a QR — magnification is a text command and has no effect on the
 symbol. Use `{qrmod}`.
 
+## Images and logos
+
+There is no `{image}` directive, and that is a decision rather than a gap. Images go through
+`{raw}`:
+
+```
+{center}
+{raw 1D 76 30 00 09 00 50 00 FF FF ... }
+```
+
+That is `GS v 0` — the raster bit image command — followed by the bitmap, one bit per pixel,
+MSB leftmost, row-major. You build it; this crate passes it through untouched.
+
+The reasoning: a bitmap cannot live in a template string. A full-width 80mm logo 150 rows
+tall is 10,800 bytes, and the format exists so that layout sits in a database row a human
+can edit. Nor will this crate decode PNGs or dither — converting a logo to 1-bit is image
+processing, it needs a dependency, and whether a gradient dithers acceptably is a judgment
+someone has to make by looking at the paper. That belongs with you, not here.
+
+So the division is: **you pre-process, we pass through.** Concretely, you own
+
+- converting to 1 bit per pixel, including any thresholding or dithering,
+- padding the width to a multiple of 8, since `GS v 0` counts width in bytes,
+- building the `xL xH yL yH` header to match the data you actually emit,
+- deciding how many bytes your printer and transport will tolerate.
+
+`{raw}` bytes are **opaque to the engine by design**. It will not check that the image fits
+the paper, will not position it, will not draw it in the preview, and will not catch an
+`xL`/`xH` header that disagrees with the data length — the classic ESC/POS image bug, which
+prints as a skewed diagonal smear and reads as a hardware fault. Nothing here can see it.
+
+**Justification applies.** `GS v 0` prints through the line buffer, so `ESC a` is what
+centers an image, and `{raw}` blocks are justified like any other:
+
+```
+{center}
+{raw 1D 76 30 ...}          <- centered
+```
+
+This is the one thing the engine does to a `{raw}` payload beyond passing it through. It
+does not inspect the bytes; it only makes sure the device is in the state the template
+asked for before they arrive.
+
+On size: `render` hands back a `Vec<u8>`, so if you need a ceiling, check `bytes.len()`
+against it in the code that knows your transport. There is deliberately no limit in the
+library — it has no basis for picking a number, and a 58mm printer on Bluetooth and an 80mm
+on ethernet are not the same problem.
+
 ## Four things that will bite you
 
 **Whitespace is stripped from both ends of every line and cell.** `Nasi Goreng    | 50.000`
