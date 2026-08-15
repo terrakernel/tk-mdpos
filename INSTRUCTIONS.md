@@ -2,6 +2,15 @@
 
 Handoff document. Read fully before writing code.
 
+> **Status, 2026-08-15.** v0.1 shipped and **§12 is met** — a hand-edited template printed
+> correctly on an Epson TM-T82X. Since then: a C ABI (`tk-mdpos-ffi`), QR symbols, and images
+> via `{raw}`. Each was out of scope in §2 as originally written and was taken on deliberately;
+> the sections below are updated to say so rather than left to disagree with the repository.
+>
+> The §1 constraints have not moved and are not expected to. Where a decision here was
+> superseded, the original reasoning is kept — it is usually still the reason the replacement
+> looks the way it does. `CLAUDE.md` carries the working notes; this file carries the design.
+
 ---
 
 ## 0. What this is
@@ -77,6 +86,20 @@ Ship small. Everything below is deliberate.
 
 Rationale: none of the deferred items can be evaluated until the layout engine exists and is known to be good. If the layout engine turns out ugly, that's two weeks lost instead of a cross-language ABI built on sand.
 
+### 2.1 What has since moved (2026-08-15)
+
+The gate above was the §12 print, and it passed. The list is therefore no longer a wall; it is a set of open questions to decide one at a time. Three have been decided:
+
+| Item | Status | Note |
+|---|---|---|
+| FFI / C ABI | **Built** | `tk-mdpos-ffi`, taken on ahead of the gate at explicit direction. The concern raised at the time — that an ABI anchors the `Op` IR before a print could prove it right — is discharged: the print happened and the engine was right. |
+| QR codes | **Built** | `{qr}` / `{qrmod}`, one `Op` variant, one command family. Cheap because the *printer* encodes the symbol; only its printed width is computed here. See §4 and §13. |
+| Bitmaps / logos | **Decided: no directive** | Images go through `{raw}` as `GS v 0` raster. The caller pre-processes. See §13. |
+
+Still out, and each to be argued on its own merits rather than by adjacency: WASM, barcodes, profile registry / TOML, data interpolation, web services, published conformance corpus, Star / ZPL / TSPL.
+
+The original rationale still governs the remainder — but note its premise has been consumed. "None of this can be evaluated until the layout engine is known to be good" was a statement about a specific unknown, and that unknown is now resolved. It is not a general-purpose argument for saying no.
+
 ---
 
 ## 3. Architecture
@@ -106,7 +129,8 @@ pub enum Op {
     Feed(u8),                     // lines
     Cut(CutKind),
     Raw(Vec<u8>),
-    // v0.2+: Qr {..}, Barcode {..}, Image {..}
+    Qr { data: String, module: u8 },   // added v0.2
+    // later, if ever: Barcode {..}
 }
 
 pub enum Align { Left, Center, Right }
@@ -114,6 +138,8 @@ pub enum CutKind { Partial, Full }
 ```
 
 Note `Row`/`Cell` do **not** appear in the IR. Columns are resolved during layout into `Text` + `AbsPos` sequences. The IR is post-layout and width-independent by construction.
+
+`Qr` obeys the same rule. It survives into the IR only because the *printer* renders the symbol from the data — layout has already resolved the one width question, namely whether it fits the paper. There is no `Image` variant for the same reason in reverse: a bitmap has no representation the engine could reason about, so it stays opaque inside `Raw`.
 
 ### 3.2 Profile
 
@@ -161,7 +187,9 @@ Es Teh Manis   | 3 x  5.000 | 15.000
 | `---` | Full-width separator, filled with `-`. |
 | `{feed N}` | Feed N lines. |
 | `{cut}` | Partial cut. Emitter auto-prepends feed if profile needs it. |
-| `{raw 1D564200}` | Hex passthrough. Load-bearing escape hatch — see §7. |
+| `{qr DATA}` | QR symbol on its own line, honoring current justification. Added v0.2 — see §13. |
+| `{qrmod N}` | QR module size in dots, 1..16. Sticky. Default 6. Added v0.2. |
+| `{raw 1D564200}` | Hex passthrough. Load-bearing escape hatch — see §7. Also the image mechanism, see §13. |
 | `**text**` | Bold (`ESC E`). |
 | `__text__` | Underline (`ESC -`). |
 
@@ -225,9 +253,16 @@ This makes a lost or duplicated document unable to corrupt the next one.
 | Full cut | `1D 56 00` | `GS V 0` |
 | Line feed | `0A` | Commits the line buffer to paper |
 
-Not needed in v0.1 but noted: `DLE EOT n` = `10 04 n`, the only real-time status query (paper out, cover open). Requires a read channel, which several transports don't have. Transport concern, not ours.
+Not needed in v0.1 but noted: `DLE EOT n` = `10 04 n`, the only real-time status query (paper out, cover open). Requires a read channel, which several transports don't have. Transport concern, not ours. (It does work on the TM-T82X over port 9100, and was used to pre-flight the §12 print — but from a test script, not from the library.)
 
 Reference: the Epson ESC/POS Command Reference is public and thorough. Use it, not blog posts.
+
+Added since (see §13):
+
+| Command | Bytes | Notes |
+|---|---|---|
+| QR family | `1D 28 6B pL pH 49 fn ...` | `GS ( k`. Five calls: model (`fn` 65), module size (67), error correction (69), store (80), print (81). `pL + pH*256` counts bytes from `cn` onward. |
+| Raster image | `1D 76 30 m xL xH yL yH d...` | `GS v 0`. Width in **bytes**, height in rows, 1bpp, MSB leftmost. Emitted by callers inside `{raw}`, never by this crate. |
 
 ---
 
@@ -238,6 +273,16 @@ Clone printers (Xprinter, Rongta, EPPOS, Gainscha — the actual installed base 
 This is unfixable in principle. `{raw HEX}` means a weird drawer-kick, a proprietary logo command, or a vendor-specific cut never blocks on a release. Implement it in v0.1; it costs one `Op` variant.
 
 **Product positioning that follows from this:** support "standard ESC/POS." Note that this is not a real standard — it's Epson's proprietary command set, copied to varying degrees, with no spec body and no certification. So make the claim falsifiable: ship a compatibility test template plus an image of its expected printed output. *"Print this. If it matches, you're supported."* Non-matching printers become paid profile work, which is only economically sane if a new printer is **config, not code** — hence §1.4.
+
+### 7.1 Superseded: clones are not chased (2026-08-15)
+
+The above argues for `{raw}` *from* clone compatibility. That premise is withdrawn. The target is genuine Epson; cheap copies are not chased, no fallbacks or per-vendor branches are added for them, and nothing is probed at runtime.
+
+The reasoning is the paragraph above taken to its conclusion. If deviation is unfixable in principle and no claim about it can be made falsifiable, then chasing it buys an open-ended bug surface and no defensible promise. One authoritative reference — the Epson command reference — is worth more than partial agreement with four vendors who agree with nobody, including each other.
+
+`{raw}` survives this intact and is now needed *more*, because it turned out to be the image mechanism (§13). Its justification simply changes: not "we support clones," but "a caller sometimes needs bytes on the wire that this crate has no opinion about." Everything §7 says about it being load-bearing rather than a hack still holds.
+
+The falsifiable-compatibility idea in the last paragraph is still the right instinct and still unbuilt. It is a better fit now than before: with one target dialect, "print this and compare" has a single correct answer.
 
 ---
 
@@ -263,6 +308,14 @@ Nasi Goreng            2 x 25.000    50.000
 
 ## 9. Do this before writing the parser
 
+> **Both gates were run in July 2026 and both are closed.** ReceiptLine was evaluated and
+> **not adopted**: three conflicts with settled constraints, the decisive one being that it
+> encodes alignment in whitespace around the `|`, and significant trailing spaces do not
+> survive a textarea, a form submit, a YAML round-trip, or most ORM-adjacent trimming — which
+> is precisely where §0 says these templates will live. Its property model was mined instead
+> of its grammar. The gap was also confirmed: every library checked is still builder-only.
+> Full findings are in `CLAUDE.md`; do not re-run these without new information.
+
 **Evaluate ReceiptLine.** OSS, markdown-flavored receipt description language, ESC/POS + StarPRNT output, SVG preview. It is approximately the thing designed above and has a claim to being the de facto standard in this niche. Spend an hour.
 
 - If it fits → implement *that* grammar in Rust. "ReceiptLine for Rust" is a far easier sell than "my receipt syntax," and existing templates work.
@@ -282,11 +335,18 @@ Golden files, from commit one:
 tests/golden/
   001-basic-columns/{input.tmpl, profile.ron, expected.bin, expected.txt}
   002-double-width-grid/
-  003-unicode-wrap/
-  004-right-align-no-wrap/
+  003-long-name-wrap/          (planned as 003-unicode-wrap; see below)
+  004-right-align-no-wrap/     (expected.err — pins a refusal, not an output)
+  005-qr-payment/              (added v0.2)
+  006-qr-too-wide/             (added v0.2, expected.err)
 ```
 
 Output must be byte-deterministic. Both backends (bytes + preview) snapshot from the same fixture.
+
+Two deviations from the plan above, both deliberate:
+
+- **`003` covers wrapping, not unicode.** The unicode fixture is blocked on the CP437 high range in the encoder: non-ASCII text is currently *rejected* rather than mangled, so no `expected.bin` can exist for it. Width measurement is already `unicode-width` throughout and is covered by unit tests. Add the fixture with the encoder table, not before.
+- **A fixture may assert a refusal** via `expected.err` instead of `expected.bin`/`.txt`. Refusing a template is a feature here — §5.4 makes a wrapped total an error — so the corpus has to be able to pin refusals too, or the most important behavior in §5 would be untested.
 
 This directory is the seed of the future conformance corpus, and eventually of the customer-facing compatibility test. Structure it as if it will be published, even though publishing is out of scope for v0.1.
 
@@ -295,7 +355,7 @@ This directory is the seed of the future conformance corpus, and eventually of t
 ## 11. Known external variables (context, not v0.1 work)
 
 - **Android 15 / 16KB page size.** Play requires 16KB-aligned native libs for apps targeting Android 15+. NDK r27+ handles it, but Rust needs `-C link-arg=-Wl,-z,max-page-size=16384` explicitly. Passes local testing, fails Play review. Verify current policy before planning around it.
-- **`catch_unwind` vs `panic=abort`.** If FFI ever happens, panics across the boundary are UB, so `panic=unwind` is required — forfeiting `panic=abort`'s size savings (~100KB). Correct trade.
+- **`catch_unwind` vs `panic=abort`.** FFI happened, so this is settled rather than hypothetical: `panic = "unwind"` is pinned in the workspace `[profile.release]` and every entry point is wrapped in `catch_unwind`. `panic = "abort"` would remove that net silently, forfeiting ~100KB of savings to keep it. Correct trade; do not "optimize" it back.
 - **Apple MFi.** Bluetooth *Classic* printers on iOS require the printer vendor to be MFi-certified. BLE via CoreBluetooth has no such gate. Hardware-selection problem, not engineering.
 - **Locked vendor SDKs.** Some cheap Chinese handhelds expose only `printText(str, size, align)` with no raw channel. The `Op` IR makes an SDK-call backend possible without raw bytes. Check for `sendRAWData` before promising support.
 - **Bytes ≠ ESC/POS.** ZPL (Zebra), TSPL (label printers), Star line mode are all bytes and none are interchangeable. Emitter-level concern, handled by the IR.
@@ -310,3 +370,46 @@ A template file, edited by hand, rendered by CLI, printed on a real 80mm printer
 If that works and the layout code isn't horrible, the deferred items in §2 become worth discussing. Not before.
 
 Build the renderer.
+
+### 12.1 Met — 2026-08-15
+
+Printed on an Epson TM-T82X (80mm, network, port 9100). Every clause of the criterion held: prices right-aligned flush to column 48, a 2x2 centered header, long names wrapping with the hanging indent returning to the column's own start, a magnified `TOTAL` row, and a clean partial cut clear of the tear edge. Rendered by CLI from a hand-edited file with no recompilation.
+
+The `ESC $` arithmetic was checked by hand against the hexdump *before* printing rather than inferred from the preview — which is the habit worth keeping, since the preview is derived from the same layout pass and would have agreed with a wrong answer.
+
+Nothing in the layout engine turned out to be wrong. That is what discharges the §2 gate and what makes the `Op` IR safe to build against.
+
+---
+
+## 13. Features added after this document was written
+
+Design notes for what postdates §2. Working detail lives in `CLAUDE.md`; the decisions and their reasons are here.
+
+### 13.1 QR — `{qr}` and `{qrmod}`
+
+**The printer encodes; this crate only sizes.** `GS ( k` takes the payload and generates the symbol, so there is no encoder, no bitmap, and no new dependency. The only thing computed here is the finished symbol's width, because layout must reject an overflowing template rather than print a clipped, unscannable code — the same reasoning as §5.4, and for higher stakes: a clipped payment code is a lost sale, not a cosmetic defect.
+
+Four choices, each documented rather than engineered around:
+
+- **Error correction is fixed at M.** Correct for payment codes, assumed by QRIS, and it keeps the capacity table one column instead of four.
+- **Sizing is a deliberate upper bound.** Capacities are byte-mode, the most expensive encoding, and the printer picks the mode itself — so a numeric payload may be rejected within a few dots of fitting. The error is always in the safe direction.
+- **The quiet zone counts against the paper.** Epson prints the symbol at its bare module dimensions, and a code flush to the edge scans badly.
+- **Payloads are UTF-8 and bypass the code page.** QR byte mode carries opaque bytes. So a `{qr}` may legally contain characters a text line currently cannot, and the payload is measured in *bytes* — the one width in the engine that is deliberately not `unicode-width`.
+
+`GS !` does not scale a symbol, so `{size}` is a no-op on a QR. Confirmed on hardware, along with the fact that `GS ( k` prints through the line buffer — which is why `ESC a` places it and no dot arithmetic is needed.
+
+### 13.2 Images — no directive, by decision
+
+Images go through `{raw}` as `GS v 0` raster bytes. **There is no `{image}` directive and there should not be one.** The audience is developers, so pre-processing is theirs: 1-bit conversion, dithering, padding width to a multiple of 8, and building the `xL xH yL yH` header.
+
+A bitmap cannot live in a template string. A full-width 80mm logo 150 rows tall is 10,800 bytes, and §0 says these strings live in database rows a human edits. Nor will this crate decode PNGs or dither — that is image processing, it needs a dependency, and whether a gradient dithers acceptably is a judgment someone has to make by looking at paper.
+
+Three alternatives were rejected, and the reasons are more durable than the outcome:
+
+- **NV logo slots (`{logo N}`)** — a logo in printer flash is *per-device state set at install time*, which contradicts §5.5: every document begins with `ESC @` and assumes nothing about prior device state. Same template, two printers, different receipt. Check proposals against §1 and §5.5 before making them.
+- **A caller-supplied asset map** (`render_with(template, profile, assets)`) — workable without breaking the existing signature, but unnecessary API surface when a caller can prepend the bytes itself.
+- **A document size limit on `Profile`** — `{raw}` cannot amplify, since two hex characters become one byte, so it is not a safety feature; and the caller already holds the returned `Vec<u8>`. Revisit only if templates become end-user-editable, where the author and the operator stop being the same person.
+
+**Layout applies justification to a `{raw}` block and does nothing else to it.** That was a fix, not the original behavior: `{center}` directly above a `{raw}` emitted nothing, so an image sat flush left while the template asked for centering — and it only appeared to work when a printed line above happened to leave `ESC a` set. Found by printing the same image four times and comparing positions.
+
+Everything else in a `{raw}` payload is passed through unexamined, including an `xL`/`xH` header that disagrees with the data. That is the classic ESC/POS image bug, it prints as a diagonal smear that reads as a hardware fault, and nothing here can catch it. Stated plainly in the README rather than mitigated.
