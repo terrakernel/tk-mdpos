@@ -57,7 +57,7 @@ TOTAL                               65.000
 
 ```toml
 [dependencies]
-tk-mdpos = "0.1"
+tk-mdpos = "0.2"
 ```
 
 The CLI and the C ABI are not published. Both live in this repository and are built from it:
@@ -66,8 +66,10 @@ The CLI and the C ABI are not published. Both live in this repository and are bu
 cargo install --git https://github.com/terrakernel/tk-mdpos tk-mdpos-cli
 ```
 
-`tk-mdpos-ffi` stays unpublished until the layout engine has been verified against real
-hardware — an ABI is a compatibility anchor, and anchoring it before that would be premature.
+`tk-mdpos-ffi` was previously held back until the layout engine had been verified against
+real hardware, since an ABI is a compatibility anchor. That verification has happened, so
+it is now unpublished by choice rather than by gate — the C ABI is stable and usable from
+this repository.
 
 ## Library
 

@@ -7,7 +7,17 @@
 use std::fmt;
 
 /// Anything that can go wrong turning a template into bytes.
+///
+/// `#[non_exhaustive]`, so callers must carry a `_` arm and a future variant is not a
+/// breaking change. Error enums grow — every syntax addition brings its own rejection —
+/// and without this each one would force a major version whose only content is a new way
+/// of saying no.
+///
+/// Deliberately *not* the same choice as [`Op`](crate::Op), which stays exhaustive: anyone
+/// matching on that is writing an emitter, and an emitter that silently swallows a new op
+/// through a `_` arm prints a wrong receipt instead of failing to compile.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Error {
     /// A `{...}` directive was not recognized.
     UnknownDirective { line: usize, name: String },

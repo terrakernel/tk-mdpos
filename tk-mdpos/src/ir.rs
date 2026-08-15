@@ -10,6 +10,11 @@
 //! incomplete; fix it there rather than widening the IR.
 
 /// A single device-independent rendering instruction.
+///
+/// Deliberately **not** `#[non_exhaustive]`, unlike [`Error`](crate::Error). Adding a
+/// variant here *should* be a breaking change: anyone matching on `Op` is writing an
+/// emitter, and an emitter that quietly drops an unknown op through a `_` arm prints a
+/// receipt that is wrong rather than failing to build. Let the compiler find them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Op {
     /// Literal text, already width-resolved and broken into lines by layout.
