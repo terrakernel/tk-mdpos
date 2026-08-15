@@ -20,6 +20,28 @@
 //!   errors carry the source line, and that text is meant for whoever edits the template,
 //!   so a bare status code would throw away the useful half.
 //!
+//! # Thread safety
+//!
+//! Every entry point is thread-safe and reentrant, and hosts may rely on it. There is no
+//! global state, no thread-local state, and no interior mutability anywhere in this crate
+//! or in [`tk_mdpos`]: rendering is a pure function of `(template, profile)`, and errors
+//! travel in the out-buffer rather than in a `last_error` slot. That last part was chosen
+//! for a different reason — an error message carrying a source line is more useful than a
+//! code — but it is also what leaves nothing to synchronize.
+//!
+//! Two consequences are worth stating because callers will otherwise assume the
+//! conservative thing and pay for it:
+//!
+//! - **A buffer may be freed on a different thread from the one that produced it.** Rust's
+//!   allocator is thread-safe, so a garbage-collected host may release from a finalizer
+//!   thread rather than plumbing the buffer back to its origin.
+//! - **One [`TkMdposProfile`] may be shared by concurrent callers.** It is read-only input
+//!   and is never written through.
+//!
+//! Ordinary aliasing of the caller's own handles is still the caller's problem: one
+//! [`TkMdposBuf`] must not be freed twice or freed while another thread reads it, and
+//! concurrent calls need separate `out` pointers.
+//!
 //! # Minimal C usage
 //!
 //! ```c
@@ -494,6 +516,62 @@ mod tests {
         assert_eq!(unsafe { tk_mdpos_columns(std::ptr::null(), 1) }, 0);
         let bad = TkMdposProfile { font: 9, ..p };
         assert_eq!(unsafe { tk_mdpos_columns(&bad, 1) }, 0);
+    }
+
+    /// A `TkMdposBuf` carries a raw pointer and so is not `Send`. Moving one between
+    /// threads is exactly the guarantee under test, and the ABI documents it as safe, so
+    /// the test has to assert that to the compiler.
+    struct Handoff(TkMdposBuf);
+    unsafe impl Send for Handoff {}
+
+    #[test]
+    fn entry_points_are_callable_concurrently() {
+        // The header promises any number of threads may call these at once without
+        // locking, and that one profile may be shared by all of them. Nothing in the
+        // crate has global state, but that is an implementation fact — this pins it as a
+        // contract, so a future `last_error` slot or memoization cache breaks a test
+        // rather than a host.
+        let profile = tk_mdpos_profile_epson_80mm();
+        let src = "{cols 20,10:r,12:r}\nNasi Goreng | 2 x 25.000 | 50.000\n{cut}";
+        let want = tk_mdpos::render(src, &Profile::epson_80mm()).unwrap();
+
+        std::thread::scope(|s| {
+            for _ in 0..16 {
+                s.spawn(|| {
+                    for _ in 0..50 {
+                        let mut out = TkMdposBuf::EMPTY;
+                        let code =
+                            unsafe { tk_mdpos_render(src.as_ptr(), src.len(), &profile, &mut out) };
+                        assert_eq!(code, TK_MDPOS_OK);
+                        let got = unsafe { std::slice::from_raw_parts(out.ptr, out.len) };
+                        assert_eq!(got, want.as_slice());
+                        unsafe { tk_mdpos_free(out) };
+                    }
+                });
+            }
+        });
+    }
+
+    #[test]
+    fn a_buffer_may_be_freed_on_another_thread() {
+        // What a garbage-collected host does: render on a worker, release from a
+        // finalizer thread rather than plumbing the buffer back to where it came from.
+        // Worth pinning because it is the guarantee a .NET or JVM wrapper leans on, and
+        // it is invisible in single-threaded testing.
+        let profile = tk_mdpos_profile_epson_80mm();
+        let src = "{center}\nHI\n{cut}";
+
+        let mut out = TkMdposBuf::EMPTY;
+        let code = unsafe { tk_mdpos_render(src.as_ptr(), src.len(), &profile, &mut out) };
+        assert_eq!(code, TK_MDPOS_OK);
+
+        let handoff = Handoff(out);
+        std::thread::spawn(move || {
+            let handoff = handoff;
+            unsafe { tk_mdpos_free(handoff.0) };
+        })
+        .join()
+        .unwrap();
     }
 
     #[test]

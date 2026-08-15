@@ -34,6 +34,16 @@ in how an existing template prints.
   symbol at the right footprint.
 - `tk_mdpos_preview_html` in the C ABI. Unlike byte output the result has no embedded NULs,
   so hosts may treat it as a C string.
+- **The C ABI's thread-safety guarantee is now documented and tested.** Every entry point
+  is thread-safe and reentrant: there is no global, thread-local, or otherwise shared
+  mutable state, since rendering is a pure function of `(template, profile)` and errors
+  travel in the out-buffer rather than a `last_error` slot. Two consequences hosts may rely
+  on: a buffer may be freed on a different thread from the one that produced it, so a
+  garbage-collected host can release from a finalizer thread; and one `TkMdposProfile` may
+  be shared by concurrent callers. This was already true — what changes is that it is
+  stated, so a wrapper author no longer has to assume the conservative thing and serialize
+  behind a lock they do not need. Pinned by two tests, verified clean under
+  ThreadSanitizer with an instrumented std.
 - `mdpos --html` in the CLI.
 - `expected.html` in every golden fixture. Existing `expected.bin` and `expected.txt` are
   byte-identical, which is the evidence that nothing in the render path moved.

@@ -20,6 +20,29 @@
  *
  * This library performs no I/O. It produces bytes; delivering them to a printer is the
  * caller's job. Queueing, chunking, retries and status polling are all out of scope.
+ *
+ * --- thread safety ---------------------------------------------------------------------
+ *
+ * Every function here is thread-safe and reentrant. There is no global state, no
+ * thread-local state, and no shared mutable state of any kind — rendering is a pure
+ * function of (template, profile), and errors travel in the out-buffer rather than in a
+ * last_error slot. Any number of threads may call any of these concurrently without
+ * locking.
+ *
+ * Two consequences worth relying on:
+ *
+ *   - A buffer may be released on a different thread from the one that produced it. Rust's
+ *     allocator is thread-safe, so a garbage-collected host may free from a finalizer
+ *     thread. The usual happens-before relationship must exist, which any runtime that
+ *     hands the buffer between threads already provides.
+ *
+ *   - A single TkMdposProfile may be shared by concurrent callers. It is read-only input
+ *     and is never written through.
+ *
+ * What is *not* covered is ordinary aliasing of your own data: one TkMdposBuf must not be
+ * freed twice or freed while another thread reads it, and two concurrent calls must be
+ * given separate `out` pointers. The functions are safe; keeping your handles unaliased
+ * remains yours.
  */
 
 #ifndef TK_MDPOS_H

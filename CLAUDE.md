@@ -63,6 +63,11 @@ cargo build -p tk-mdpos-ffi
 cc -Wall -Wextra -Itk-mdpos-ffi/include tk-mdpos-ffi/tests/smoke.c target/debug/libtk_mdpos.a \
    -o /tmp/tk-mdpos-smoke && /tmp/tk-mdpos-smoke
 # add -fsanitize=address to check the allocation contract
+
+# The ABI documents a thread-safety guarantee, so it is checked rather than asserted.
+# Needs nightly + rust-src; -Zbuild-std is required or the sanitizer ABI mismatches core.
+RUSTFLAGS="-Zsanitizer=thread" cargo +nightly test -p tk-mdpos-ffi \
+  -Zbuild-std --target aarch64-apple-darwin
 ```
 
 Golden fixtures are regenerated deliberately, never automatically. If a change rewrites a
@@ -147,6 +152,16 @@ Made while writing the C ABI:
   record which format version a stored template was written against.
 - **The header is hand-written, not cbindgen'd**, to avoid a build dependency. `tests/smoke.c` is
   therefore load-bearing: it is the only thing that catches the header drifting from the ABI.
+- **Thread safety is a documented guarantee, not an accident** (added 2026-08-15). No global,
+  thread-local, or shared mutable state exists anywhere in the core or the ABI, so every entry
+  point is reentrant and hosts may call concurrently without locking. A buffer may also be freed
+  on a thread other than the one that produced it, which is what a GC'd host's finalizer does.
+  Two tests pin this and it is verified under ThreadSanitizer. **Do not introduce a `last_error`
+  slot, a memo cache, or any other shared state** — the "errors ride in the out-buffer" decision
+  is what makes the guarantee free, and breaking it now breaks published documentation.
+- **Parameter names in the header avoid C++ keywords.** Three prototypes said `template`, which
+  made the header uncompilable from C++ despite its `extern "C"` guards. They say `tmpl`. Names
+  in a prototype are documentation only and carry no ABI weight.
 
 ---
 
