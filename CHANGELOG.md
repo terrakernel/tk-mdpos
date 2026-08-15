@@ -48,6 +48,15 @@ in how an existing template prints.
 - `expected.html` in every golden fixture. Existing `expected.bin` and `expected.txt` are
   byte-identical, which is the evidence that nothing in the render path moved.
 
+- **Apple platform artifacts.** `tk-mdpos-ffi/build-xcframework.sh` produces
+  `TkMdpos.xcframework` with three slices — universal macOS, iOS device, and a universal iOS
+  simulator — plus a hand-written `module.modulemap` beside the header so Swift can
+  `import TkMdpos` without a bridging header. `staticlib` rather than `cdylib`, since iOS
+  will not load an arbitrary dylib and a static archive needs no runtime lookup. The script
+  links `tests/smoke.c` against the finished bundle before reporting success, because a
+  framework that assembled is not a framework that links. Not published anywhere yet; the
+  distribution route is undecided.
+
 ### Fixed
 
 - `include/tk_mdpos.h` could not be included from C++, despite its `extern "C"` guards:

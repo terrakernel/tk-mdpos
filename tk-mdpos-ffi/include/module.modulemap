@@ -1,0 +1,9 @@
+// Lets Swift and Objective-C consume the C ABI as `import TkMdpos`.
+//
+// Lives beside the header rather than being generated, for the same reason the header is
+// hand-written: no build dependency, and one less thing that can drift silently. It is
+// copied into every slice of the XCFramework by build-xcframework.sh.
+module TkMdpos {
+    header "tk_mdpos.h"
+    export *
+}

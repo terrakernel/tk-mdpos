@@ -64,6 +64,10 @@ cc -Wall -Wextra -Itk-mdpos-ffi/include tk-mdpos-ffi/tests/smoke.c target/debug/
    -o /tmp/tk-mdpos-smoke && /tmp/tk-mdpos-smoke
 # add -fsanitize=address to check the allocation contract
 
+# Apple XCFramework (macOS + iOS device + simulator). Needs Xcode, not just the CLT.
+# Self-verifying: it links tests/smoke.c against the finished bundle before reporting.
+./tk-mdpos-ffi/build-xcframework.sh
+
 # The ABI documents a thread-safety guarantee, so it is checked rather than asserted.
 # Needs nightly + rust-src; -Zbuild-std is required or the sanitizer ABI mismatches core.
 RUSTFLAGS="-Zsanitizer=thread" cargo +nightly test -p tk-mdpos-ffi \
@@ -532,10 +536,14 @@ Unix command and translate it by eye.
 
 ### The NuGet release job
 
-**RIDs are decided (Julian, 2026-08-15): `win-x64` and `linux-x64`. That is the whole
-claim.** `osx-*` and `android-*` are deliberately not shipped — do not add them because a
-runner could produce them, and do not describe the package as supporting a platform it does
-not carry a binary for. Revisit only if someone asks for one.
+**RIDs are decided (Julian, 2026-08-15): `win-x64` and `linux-x64`. That is the whole NuGet
+claim.** `android-*` is deliberately not shipped despite Android being the largest target
+hardware — do not add a RID because a runner could produce it, and do not describe the
+package as supporting a platform it carries no binary for. Revisit only if someone asks.
+
+**`osx-*` is absent from NuGet because Apple platforms ship through a different channel, not
+because they are unsupported** — see "Apple platforms" below. Do not read the two notes as
+contradicting each other, and do not add osx RIDs to close an apparent gap.
 
 **Neither target can be built on the current development machine**, which is macOS arm64.
 `x86_64-pc-windows-msvc` needs the MSVC toolchain, and `x86_64-unknown-linux-gnu` needs a
@@ -584,6 +592,49 @@ reaching into the C ABI paying off.
 - **TSan on every push.** It needs nightly plus `-Zbuild-std`, which rebuilds core and std
   and costs minutes. Put it on a weekly schedule or manual dispatch. ASan is the one that
   belongs on every push.
+
+## Apple platforms
+
+Built 2026-08-15. `tk-mdpos-ffi/build-xcframework.sh` produces
+`target/TkMdpos.xcframework` with three slices:
+
+```
+macos-arm64_x86_64            universal
+ios-arm64                     device
+ios-arm64_x86_64-simulator    universal, so the simulator works on both Mac generations
+```
+
+Verified on the day: all five targets compile, `xcodebuild` classifies each slice correctly,
+the device slice carries `LC_VERSION_MIN_IPHONEOS` on a real code object (so it is genuinely
+device and not simulator), and `tests/smoke.c` links against the macOS slice *inside the
+bundle* and passes — on both arm64 and x86_64 under Rosetta. The other two slices cannot be
+executed here; xcodebuild's platform classification is the evidence for those.
+
+Decisions worth keeping:
+
+- **`staticlib`, not `cdylib`.** iOS will not load an arbitrary `.dylib`, and a static
+  archive is one artifact with no runtime lookup. The `[lib]` comment in `Cargo.toml` already
+  anticipated this. There is nothing to bundle alongside it — eight symbols, no dependency
+  beyond libSystem.
+- **`include/module.modulemap` is hand-written and lives beside the header**, for the same
+  reason the header is: no build dependency, one less thing that can drift. It is what lets
+  Swift say `import TkMdpos` instead of dropping to a bridging header. Adding it to
+  `include/` does not disturb the plain `-I` C build — checked.
+- **The script is not wired into `cargo build`.** It shells out to `lipo` and `xcodebuild`,
+  runs only on macOS, and building a distributable framework is a release step rather than
+  part of the edit-compile loop.
+- **It self-verifies.** The script links `smoke.c` against the finished bundle rather than
+  trusting that the files were copied. A framework that assembled is not a framework that
+  links.
+
+Not built and not decided: tvOS, watchOS, visionOS, and Mac Catalyst. `rustup` offers
+targets for all of them and the script could trivially grow slices. Do not add them without
+someone asking — a slice is a support claim.
+
+**Distribution is undecided.** The XCFramework is produced but not published; a Swift Package
+(binaryTarget with a checksum) or a CocoaPods spec are the obvious routes, and neither has
+been chosen. `target/` is gitignored, so the bundle is a build output rather than a committed
+artifact.
 
 ## Reference
 
