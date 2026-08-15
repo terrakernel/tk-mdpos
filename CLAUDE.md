@@ -476,6 +476,93 @@ the seed of both the conformance corpus and the customer-facing compatibility te
 Priority cases: basic columns, double-width grid mutation, unicode wrapping, right-align
 overflow rejection. Those are the four places §5 says the engine will be wrong.
 
+## CI — planned, not built
+
+There is no `.github/workflows` yet. Agreed 2026-08-15 as the next ABI work item, and
+**deferred to a Windows machine**, because Julian's immediate focus is publishing on the
+Windows platform and the Windows leg is the only genuinely fiddly part.
+
+### Why it is urgent rather than tidy
+
+`tests/smoke.c` is the **only** check that catches the hand-written header drifting from the
+compiled library, and it deliberately is not part of `cargo test`. So today it runs when
+someone remembers. Once a NuGet package ships, consumers link against that header. The
+`template`-as-a-parameter-name bug proves the point: it shipped in 0.1, made the header
+uncompilable from C++ despite its `extern "C"` guards, and survived until August because
+nothing checked it.
+
+### The core job
+
+- `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings`.
+  Golden fixtures ride along, so a silently regenerated `.bin` fails the run.
+- **Build and run `tests/smoke.c`.** The whole reason for the workflow.
+- **ASan over `smoke.c`**, which is what validates the allocation contract.
+- **Compile the header as C++** (`c++ -fsyntax-only` over a TU that only includes it).
+  Cheap, and it is the check that was missing.
+- An MSRV job on 1.85. `rust-version` claims it and nothing currently verifies the claim.
+
+### Matrix: ubuntu, macos, windows — and what it is really testing
+
+There are **no platform branches in the Rust at all** (verified: no `cfg(target…)`,
+`cfg(windows)`, or `cfg(unix)` in any of the three crates). So the matrix is not testing
+library logic. It tests the C toolchain integration and artifact naming, which is precisely
+what breaks for a consumer rather than for us.
+
+**The Windows leg is the work.** Everything in "Commands" above assumes Unix:
+
+- there is no `cc` — use `cl.exe` from a Developer Prompt, or `clang` from LLVM;
+- the staticlib is `tk_mdpos.lib`, not `libtk_mdpos.a`;
+- the cdylib is `tk_mdpos.dll` with **no `lib` prefix**;
+- linking the staticlib needs the usual Windows system libs (`ws2_32`, `userenv`,
+  `advapi32`, `ntdll`, `bcrypt` — `rustc --print native-static-libs` reports the real list
+  for the target, so ask it rather than guessing).
+
+A starting point, **unverified — it has never been run on Windows**, so treat the first run
+as debugging rather than as a regression:
+
+```
+cargo build -p tk-mdpos-ffi
+cl /W4 /I tk-mdpos-ffi\include tk-mdpos-ffi\tests\smoke.c ^
+   target\debug\tk_mdpos.lib %EXTRA_LIBS% /Fe:smoke.exe
+smoke.exe
+```
+
+Confirm the artifact names against `target\debug\` before assuming them; do not copy the
+Unix command and translate it by eye.
+
+### The NuGet release job
+
+Cross-compile the cdylib per RID and upload the artifacts, because one machine will not
+produce win-x64, linux-x64, osx-arm64 and android-arm64 comfortably.
+
+**Open decision — which RIDs to claim.** Not a packaging detail: Android needs an NDK in the
+job, which is meaningfully more setup than the desktop targets. If the real hardware is
+Sunmi/iMin/Telpo then `android-arm64` outranks `win-x64`; if the near-term goal is a Windows
+POS host, it does not. Ask before building the matrix.
+
+Include a job that runs the **packaged**-crate check, not `cargo publish --dry-run`:
+
+```
+cargo package -p tk-mdpos
+cd target/package/tk-mdpos-<version>/ && cargo test
+```
+
+The dry-run passed cleanly on 0.1.0 while three defects shipped, because its verify step
+only builds the lib — it never builds or runs tests and never checks that licence or readme
+files exist. Same trap, and NuGet's `runtimes/{rid}/native/` layout fails the same way: packs
+clean, breaks on the consumer's machine, no build error.
+
+### Two things deliberately left out
+
+- **`cargo fmt --check`.** The repo is **not currently rustfmt-clean** — `emit/escpos.rs` has
+  at least two pre-existing diffs (import ordering and the `GS ( k` header call), most likely
+  from edition 2024's style changes. Adding the gate fails the first run on untouched code.
+  Do the reformat as its own commit first — formatting cannot change emitted bytes, and the
+  golden fixtures prove that — then enable the gate. Julian has not signed off on that diff.
+- **TSan on every push.** It needs nightly plus `-Zbuild-std`, which rebuilds core and std
+  and costs minutes. Put it on a weekly schedule or manual dispatch. ASan is the one that
+  belongs on every push.
+
 ## Reference
 
 Use the Epson ESC/POS Command Reference, not blog posts. v0.1 command set is tabulated in
