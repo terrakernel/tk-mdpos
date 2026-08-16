@@ -419,12 +419,45 @@ or `ir.rs` — purely additive, no new dependency.
 `mdpos --html`. So the backend is settled, and the condition that watch mode was held behind
 has been met.
 
-**Watch mode (`--html --watch`) is deferred, not rejected, and is now decidable.** It would
-be the clearest demonstration of the whole thesis — edit the template, the receipt updates,
-no compile — and costs one file-watcher dependency in the CLI only, with reload injected by
-the CLI so the core keeps emitting a clean fragment. It was held on the grounds that a watch
-mode over a mediocre preview just shows mediocrity faster; the preview is not mediocre, so
-decide it on its own merits.
+## Decisions made while adding watch mode (`--watch`)
+
+Built 2026-08-16, at Julian's direction. It was held behind the HTML preview being good
+enough to be worth watching — a watch mode over a mediocre preview just shows mediocrity
+faster — and that condition was met the day before. Nothing in the core changed.
+
+- **No file-watcher dependency, contrary to the original estimate.** Polling
+  `metadata().modified()` every 200 ms keeps `tk-mdpos-cli` at *zero* dependencies, and it
+  is genuinely the better mechanism here rather than merely the lighter one: editors that
+  save atomically write a temporary file and rename it over the original, which breaks a
+  watch registered against the original inode. Re-stat'ing the path by name handles that
+  case for free. A failed stat is treated as the gap during an atomic save and skipped,
+  leaving `last` untouched so the write after the rename still registers.
+- **A render failure keeps the loop alive and puts the message on the page.** A template
+  being edited is invalid half the time. Blanking the page or leaving the last good render
+  up would both imply the edit was fine; the error document shows the message with its
+  source line and keeps reloading, so fixing the template recovers on the next save.
+- **Reload is a `meta refresh`, injected by the CLI.** `preview_html` keeps returning a
+  clean fragment and has no business knowing about reloading — framing is the binary's job,
+  the same division that already puts `ESC @` in the emitter rather than the IR. A
+  websocket or an injected live-reload client would be nicer and needs a server, and
+  "web services" is on the not-decided list; a preview flag does not get to make that call.
+  A few lines of `sessionStorage` preserve scroll position across the reload, which is what
+  makes a 1 s refresh tolerable.
+- **`--watch` is rejected for byte output and for stdin**, up front rather than discovered
+  later. There is nothing to re-read from a pipe, and rewriting a binary document in place
+  helps nobody. `--html --watch` additionally requires `-o`, since a browser needs a file to
+  keep open.
+- **`-o` works for every backend, not just watch mode.** It was needed for `--html --watch`
+  anyway, and it fixes a real trap: PowerShell's `>` redirection re-encodes the stream and
+  corrupts ESC/POS bytes. Worth knowing on the Windows machine.
+- **No ANSI screen clearing in `--preview --watch`.** Escapes are not honoured on every
+  Windows console — verified on this machine, where they print literally — and spraying
+  `[2J[H` into someone's terminal is worse than scrolling. Successive renders stay in
+  scrollback instead, which suits the monospace preview's job as a diff tool.
+- **The wrapper is tested for embedding the fragment verbatim.** The golden fixtures assert
+  the two preview backends against each other, so a document that mangled the fragment
+  would slip past them entirely. Path and error text are HTML-escaped, with a test that a
+  path containing markup cannot break out of the page.
 
 ---
 
@@ -971,12 +1004,6 @@ blocking anything else.
 
   Blocks the unicode golden fixture, which is why `tests/golden/` has six cases rather than
   seven. QR payloads are unaffected: they bypass the code page and go out as UTF-8.
-
-- **Watch mode (`--html --watch`).** Deferred, not rejected, and now decidable — it was held
-  behind the HTML preview being good enough to be worth watching, and that condition was met
-  on 2026-08-15. One file-watcher dependency in the CLI only, with reload injected by the
-  CLI so the core keeps emitting a clean fragment. Would be the clearest demonstration of
-  the whole thesis: edit the template, the receipt updates, no compile.
 
 - **`cargo fmt --check` in CI.** The repo is not rustfmt-clean — `emit/escpos.rs` has at
   least two pre-existing diffs, most likely from edition 2024's style changes. Do the

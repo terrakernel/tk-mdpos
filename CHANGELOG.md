@@ -9,6 +9,31 @@ API and carries the compatibility promise: the engine may be rewritten freely, b
 template must render identically in perpetuity. A major bump here does not license a change
 in how an existing template prints.
 
+## [Unreleased]
+
+### Added
+
+- **Watch mode in the CLI.** `mdpos --html --watch receipt.tmpl -o preview.html` re-renders
+  whenever the template changes; open the file once and leave it open, and editing the
+  template updates the receipt with no rebuild. `--preview --watch` does the same in the
+  terminal. This is the thesis of the library made visible: layout is data, so changing it
+  is an edit rather than a release.
+
+  A template that fails to render leaves the error and its line number on the page rather
+  than blanking it or leaving the last good render up — both would imply the edit was fine.
+  The next successful save recovers.
+
+  Costs no dependency: `tk-mdpos-cli` still has none beyond `tk-mdpos`. It polls the file's
+  timestamp rather than subscribing to filesystem events, which is also more robust here,
+  since editors that save atomically rename a temporary file over the original and break a
+  watch registered against the original. Reload is a `meta refresh` injected by the CLI, so
+  `preview_html` keeps returning a clean fragment and the core stays unaware that watching
+  exists.
+
+- **`-o, --out <file>` for every backend.** Needed by `--html --watch`, and it avoids a real
+  trap on Windows: PowerShell's `>` redirection re-encodes the stream and corrupts ESC/POS
+  byte output.
+
 ## [0.3.0] — 2026-08-16
 
 First release distributed for Apple platforms and .NET as well as crates.io.

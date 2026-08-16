@@ -123,10 +123,38 @@ font, never hardcoded. `columns_at(2)` gives it under `{size 2x2}`.
 
 ```sh
 mdpos receipt.tmpl > out.bin        # ESC/POS bytes to stdout — always redirect
+mdpos receipt.tmpl -o out.bin       # or write the file directly
 mdpos --preview receipt.tmpl        # monospace preview
 mdpos --html receipt.tmpl > p.html  # HTML preview; open it in a browser
 cat receipt.tmpl | mdpos -          # read from stdin
 ```
+
+On PowerShell prefer `-o` over `>`: its redirection re-encodes the stream and corrupts
+binary output.
+
+### Watch mode
+
+```sh
+mdpos --html --watch receipt.tmpl -o preview.html
+```
+
+Open `preview.html` and leave it open. Edit the template, save, and the receipt updates —
+no rebuild, no restart. That is the whole thesis of this library made visible: layout is
+data, so changing it is an edit rather than a release.
+
+`--preview --watch` does the same in the terminal, printing a timestamped render on each
+save so successive versions stay in scrollback.
+
+A template that fails to render **leaves the error on the page**, with its line number,
+rather than blanking it or leaving the last good render up — both of which would suggest
+the edit was fine. Fix the template and the next save recovers.
+
+Two things it deliberately does not do. It polls the file's timestamp rather than
+subscribing to filesystem events, which keeps the CLI at zero dependencies and is more
+robust besides: editors that save atomically write a temporary file and rename it over the
+original, which breaks a watch registered against the original file. And the page reloads
+itself on a timer rather than being pushed to, because a live-reload socket means running a
+server, which is a bigger decision than a preview flag should make.
 
 The CLI uses `Profile::epson_80mm()`. There is no profile flag yet.
 
