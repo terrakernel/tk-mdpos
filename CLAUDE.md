@@ -842,8 +842,16 @@ Two smaller decisions worth keeping:
 Done by hand for 0.3.0 (2026-08-16) and validated end to end. Automate this as a workflow
 only after it has been run once more the same way — the sequence below is the specification.
 
-**One git tag serves everything**: the Rust crate version, the GitHub Release, and the Swift
-package version. SwiftPM resolves from tags, so they cannot diverge.
+**One git tag serves everything**: the Rust crate version, the GitHub Release, the Swift
+package version, and the NuGet package version. SwiftPM resolves from tags, so they cannot
+diverge.
+
+**The NuGet version tracks the crate version and is not allowed to drift** (Julian,
+2026-08-16). `TerraKernel.Mdpos` 0.3.0 wraps `tk-mdpos` 0.3.0: the number denotes which
+engine ABI the wrapper exposes, not the wrapper's own history. So the .NET package does not
+get its own version line even when only its own code changed — it rides the engine's.
+`ci.yml` fails the build when `Cargo.toml` and the `.csproj` disagree, so this is enforced
+rather than remembered.
 
 **There is no chicken-and-egg between checksum and publish.** A release asset URL is
 deterministic for a given tag, so the zip is checksummed locally, `Package.swift` is written

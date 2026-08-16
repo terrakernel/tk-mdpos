@@ -9,7 +9,14 @@ API and carries the compatibility promise: the engine may be rewritten freely, b
 template must render identically in perpetuity. A major bump here does not license a change
 in how an existing template prints.
 
-## [Unreleased]
+## [0.3.0] — 2026-08-16
+
+First release distributed for Apple platforms and .NET as well as crates.io.
+
+The NuGet package and the CI workflows landed after the crate had already been published to
+crates.io the same day. The package deliberately carries the same version: it denotes which
+engine ABI the wrapper exposes rather than the wrapper's own history, so `TerraKernel.Mdpos`
+0.3.0 wraps `tk-mdpos` 0.3.0. From here the two ship together from one tag.
 
 ### Added
 
@@ -43,20 +50,6 @@ in how an existing template prints.
   `smoke.c` was previously the only check on header drift and ran when someone remembered.
   The Windows leg is verified rather than assumed: the required system libraries are
   `kernel32 ntdll userenv ws2_32 dbghelp`, which is not what was guessed.
-
-### Fixed
-
-- **`.gitattributes` pins the tree to LF.** A Windows clone with the default
-  `core.autocrlf=true` checked out the golden fixtures as CRLF and failed every fixture
-  compared against LF output, and gave `build-xcframework.sh` a CRLF shebang that macOS
-  rejects as a bad interpreter. No engine behaviour was involved — templates themselves
-  are unaffected, since the parser splits with `str::lines()` and strips a trailing `\r`.
-
-## [0.3.0] — 2026-08-16
-
-First release distributed for Apple platforms as well as crates.io.
-
-### Added
 
 - **Swift package.** `Package.swift` at the repository root declares a `binaryTarget`
   pointing at `TkMdpos.xcframework.zip` on this release, so Xcode and SwiftPM can consume
@@ -123,6 +116,12 @@ First release distributed for Apple platforms as well as crates.io.
   three prototypes named a parameter `template`, which is a keyword there. Renamed to
   `tmpl`. Parameter names in a prototype are documentation only, so this is not an ABI
   change.
+
+- **`.gitattributes` pins the tree to LF.** A Windows clone with the default
+  `core.autocrlf=true` checked out the golden fixtures as CRLF and failed every fixture
+  compared against LF output, and gave `build-xcframework.sh` a CRLF shebang that macOS
+  rejects as a bad interpreter. No engine behaviour was involved — templates themselves
+  are unaffected, since the parser splits with `str::lines()` and strips a trailing `\r`.
 
 ## [0.2.0] — 2026-08-15
 
