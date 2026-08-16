@@ -43,7 +43,7 @@ engine ABI the wrapper exposes rather than the wrapper's own history, so `TerraK
 
 - **CI.** `.github/workflows/ci.yml` runs tests, clippy, the `smoke.c` ABI check and a C++
   header compile across Linux, macOS and Windows, plus ASan over `smoke.c`, an MSRV job at
-  1.85, and a packaged-crate test. `.github/workflows/release-nuget.yml` builds each RID
+  1.85, and a packaged-crate test. `.github/workflows/publish.yml` builds each RID
   natively on its own runner, packs, verifies by consuming the package on both RIDs, and
   publishes on a `vX.Y.Z` tag.
 

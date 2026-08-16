@@ -11,6 +11,12 @@
 # shipped despite Android being the largest target hardware, and osx-* is absent because
 # Apple platforms ship as an XCFramework through a Swift package instead. Do not add a RID
 # because a runner could produce it: a RID is a support claim.
+#
+# THIS FILE'S NAME IS PART OF THE PUBLISHING CREDENTIAL. The OIDC token carries the
+# workflow's path, and the Trusted Publishing policy on nuget.org is bound to
+# `publish.yml`. Renaming or moving this file silently invalidates the policy and the
+# token exchange starts failing with an authorization error. The same is true of the
+# `production` environment named below.
 name: NuGet release
 
 on:
@@ -183,16 +189,16 @@ jobs:
   # exchanges it for an API key valid for minutes, and nothing long-lived is ever kept in
   # repository secrets — so there is no key to leak, rotate, or forget to revoke.
   #
-  # This requires a Trusted Publishing policy on nuget.org bound to this repository and
-  # this workflow. The policy's claims must match what the token carries: repository,
-  # workflow file, and — because `environment:` is set below — the environment name too.
-  # A mismatch fails at the exchange with an authorization error rather than at the push.
+  # This requires a Trusted Publishing policy on nuget.org bound to this repository, this
+  # workflow file (publish.yml) and the `production` environment. The policy's claims must
+  # match what the token carries; a mismatch fails at the exchange with an authorization
+  # error rather than at the push, which is a confusing place to start debugging.
   publish:
     name: publish to nuget.org
     needs: verify
     if: startsWith(github.ref, 'refs/tags/v') || inputs.publish
     runs-on: ubuntu-latest
-    environment: nuget
+    environment: production
 
     # id-token: write is what allows the OIDC token to be requested at all. Without it the
     # login step fails; it is not granted by default.

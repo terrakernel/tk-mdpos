@@ -160,7 +160,7 @@ jobs:
           }
 
       # Only the host RID is available on one runner, so this cannot produce a publishable
-      # package — release-nuget.yml gathers both. What it does prove on every push is that
+      # package — publish.yml gathers both. What it does prove on every push is that
       # the wrapper still matches the ABI and that the corpus still renders identically
       # through it, which is the half that breaks when the Rust side moves.
       - name: Stage the native binary

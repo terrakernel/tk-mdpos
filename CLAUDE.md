@@ -544,7 +544,7 @@ overflow rejection. Those are the four places §5 says the engine will be wrong.
 
 ## CI — built 2026-08-16
 
-`.github/workflows/ci.yml` and `.github/workflows/release-nuget.yml` exist and **both have
+`.github/workflows/ci.yml` and `.github/workflows/publish.yml` exist and **both have
 run green**. Written on the Windows machine, with every Windows command run locally first
 rather than translated from the Unix ones by eye — which is why `ci.yml` passed all seven
 jobs on its first run.
@@ -764,16 +764,23 @@ receipt printed from the packaged package to a TM-T82X. See "Hardware".
   and nuget.org exchanges it for a key valid for minutes, so there is no long-lived secret
   to leak, rotate, or forget to revoke. **Do not reintroduce a `NUGET_API_KEY` secret.**
 
-  Three things have to line up, and a mismatch fails at the *exchange* with an
-  authorization error rather than at the push, which is a confusing place to debug from:
+  **Three identifiers are part of the credential, not cosmetic.** The OIDC token carries
+  them and nuget.org checks them, so changing any one silently invalidates publishing:
 
-  - `permissions: id-token: write` on the job. Not granted by default.
-  - A repository variable `NUGET_USER` naming the nuget.org account that holds the policy.
-    The `TerraKernel.OdxClient` package is owned by `TerraKernel`, but the policy may sit
-    on a personal account instead — the workflow fails early with an explicit message
-    rather than guessing.
-  - A Trusted Publishing policy on nuget.org whose claims match this repository, this
-    workflow file, **and** the `nuget` environment, since the job sets one.
+  | What | Value | Where it lives |
+  |---|---|---|
+  | Workflow file | `.github/workflows/publish.yml` | the token's workflow claim |
+  | Environment | `production` | `environment:` on the publish job |
+  | Account | `julianrichie` | repository variable `NUGET_USER` |
+
+  **Do not rename `publish.yml` or the `production` environment.** The name is descriptive
+  of nothing in particular — it is matched against a policy stored on nuget.org, and a
+  rename fails at the token *exchange* with an authorization error rather than at the push,
+  which is a confusing place to start debugging. `NUGET_USER` is a personal account even
+  though the package owner is the `TerraKernel` organisation; the two are unrelated.
+
+  Also required: `permissions: id-token: write` on the job, which is not granted by default,
+  and a policy on nuget.org that permits the package ID itself.
 
 Everything upstream of publish has been exercised via `workflow_dispatch` with
 `publish: false`, which is the right rehearsal and is worth repeating before a real tag.
@@ -825,7 +832,7 @@ Two smaller decisions worth keeping:
 - **RIDs are `win-x64` and `linux-x64`.** Nothing else — see the CI section.
 - **On a Windows machine `win-x64` builds natively, `linux-x64` does not.** **WSL is not
   installed on this machine** (checked 2026-08-16), so locally the linux leg is simply
-  unavailable and `release-nuget.yml` is the only route to it. Install WSL or use a
+  unavailable and `publish.yml` is the only route to it. Install WSL or use a
   container if that changes; do not reach for a cross-linker first.
 - **`runtimes/{rid}/native/` is the layout that fails silently.** Wrong path means no build
   error and a P/Invoke failure on someone else's machine. The check is consuming the packed
@@ -833,7 +840,7 @@ Two smaller decisions worth keeping:
   `TerraKernel.Mdpos.csproj` now also **refuses to pack** when a claimed RID's binary is
   missing, which closes the cheap half of that trap early. The escape hatch
   `-p:MdposAllowMissingRuntimes=true` exists for local smoke builds and emits a warning;
-  a package built with it must never be published, and `release-nuget.yml` does not pass it.
+  a package built with it must never be published, and `publish.yml` does not pass it.
 - **`DllImport("tk_mdpos")` resolves `tk_mdpos.dll` and `libtk_mdpos.so` automatically** on
   modern .NET. No per-platform naming needed in C#.
 - **The buffer contract is the whole ABI risk.** Every buffer — including the one returned
@@ -905,7 +912,7 @@ failure that nothing earlier can:
 Only `tk-mdpos` is published to crates.io. `tk-mdpos-cli` and `tk-mdpos-ffi` have never been
 published and publishing them is an unmade decision, not an oversight.
 
-**NuGet is not part of that hand sequence and should not become one.** `release-nuget.yml`
+**NuGet is not part of that hand sequence and should not become one.** `publish.yml`
 fires on the same `vX.Y.Z` tag and does the whole thing — native build per RID on its own
 runner, pack, consume-verify on both RIDs, push. It needs a `NUGET_API_KEY` secret on a
 `nuget` environment; without it the publish job fails loudly rather than skipping. The
