@@ -82,6 +82,11 @@ RUSTFLAGS="-Zsanitizer=thread" cargo +nightly test -p tk-mdpos-ffi \
 ./tk-mdpos-dotnet/stage-native.ps1
 dotnet run --project tk-mdpos-dotnet/TerraKernel.Mdpos.Smoke
 
+# On macOS stage-native.ps1 refuses, because osx is not a shipped RID. The harness still
+# runs there: it picks libtk_mdpos.dylib straight out of target/, preferring release.
+cargo build -p tk-mdpos-ffi --release
+dotnet run --project tk-mdpos-dotnet/TerraKernel.Mdpos.Smoke
+
 # Local pack. Refuses without a linux-x64 binary unless overridden — see the NuGet section.
 dotnet pack tk-mdpos-dotnet/TerraKernel.Mdpos -c Release -o nupkg \
   -p:MdposAllowMissingRuntimes=true

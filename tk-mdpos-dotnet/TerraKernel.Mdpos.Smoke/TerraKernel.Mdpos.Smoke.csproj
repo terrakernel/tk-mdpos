@@ -33,18 +33,57 @@
   </ItemGroup>
 
   <!-- The native binary the P/Invoke needs at runtime. Staged by stage-native.ps1 (or by
-       CI); named per host because DllImport("tk_mdpos") resolves tk_mdpos.dll on Windows
-       and libtk_mdpos.so on Linux. -->
+       CI); named per host because DllImport("tk_mdpos") resolves tk_mdpos.dll on Windows,
+       libtk_mdpos.so on Linux and libtk_mdpos.dylib on macOS.
+
+       Tested with IsOSPlatform rather than '$(OS)' != 'Windows_NT', which is also true on
+       macOS and would have offered a Linux .so to a Mac. -->
+  <PropertyGroup>
+    <MdposWinNative>$(MSBuildThisFileDirectory)../runtimes/win-x64/native/tk_mdpos.dll</MdposWinNative>
+    <MdposLinuxNative>$(MSBuildThisFileDirectory)../runtimes/linux-x64/native/libtk_mdpos.so</MdposLinuxNative>
+  </PropertyGroup>
+
   <ItemGroup>
-    <None Include="../runtimes/win-x64/native/tk_mdpos.dll"
-          Condition="Exists('$(MSBuildThisFileDirectory)../runtimes/win-x64/native/tk_mdpos.dll') And '$(OS)' == 'Windows_NT'"
+    <None Include="$(MdposWinNative)"
+          Condition="$([MSBuild]::IsOSPlatform('Windows')) And Exists('$(MdposWinNative)')"
           CopyToOutputDirectory="PreserveNewest"
           Link="tk_mdpos.dll" />
 
-    <None Include="../runtimes/linux-x64/native/libtk_mdpos.so"
-          Condition="Exists('$(MSBuildThisFileDirectory)../runtimes/linux-x64/native/libtk_mdpos.so') And '$(OS)' != 'Windows_NT'"
+    <None Include="$(MdposLinuxNative)"
+          Condition="$([MSBuild]::IsOSPlatform('Linux')) And Exists('$(MdposLinuxNative)')"
           CopyToOutputDirectory="PreserveNewest"
           Link="libtk_mdpos.so" />
   </ItemGroup>
+
+  <!-- macOS is not a shipped RID and this does not make it one: the package project is
+       untouched and still claims win-x64 and linux-x64 only. But this harness is what
+       proves the wrapper still matches the ABI, and it is worth being able to run on the
+       machine the Rust work happens on. So point straight at cargo's output rather than
+       inventing a runtimes/osx-* directory that would read as a support claim.
+
+       Prefer release, since that is what stage-native.ps1 builds and what ships. -->
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <MdposDylibRelease>$(MSBuildThisFileDirectory)../../target/release/libtk_mdpos.dylib</MdposDylibRelease>
+    <MdposDylibDebug>$(MSBuildThisFileDirectory)../../target/debug/libtk_mdpos.dylib</MdposDylibDebug>
+  </PropertyGroup>
+
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <None Include="$(MdposDylibRelease)"
+          Condition="Exists('$(MdposDylibRelease)')"
+          CopyToOutputDirectory="PreserveNewest"
+          Link="libtk_mdpos.dylib" />
+
+    <None Include="$(MdposDylibDebug)"
+          Condition="!Exists('$(MdposDylibRelease)') And Exists('$(MdposDylibDebug)')"
+          CopyToOutputDirectory="PreserveNewest"
+          Link="libtk_mdpos.dylib" />
+  </ItemGroup>
+
+  <!-- Without this the failure is a DllNotFoundException at run time, which says nothing
+       about the cause. Say it at build time instead. -->
+  <Target Name="MdposWarnMissingDylib" BeforeTargets="Build"
+          Condition="$([MSBuild]::IsOSPlatform('OSX')) And !Exists('$(MdposDylibRelease)') And !Exists('$(MdposDylibDebug)')">
+    <Warning Text="No libtk_mdpos.dylib in target/. This harness will fail with DllNotFoundException. Build it first: cargo build -p tk-mdpos-ffi --release" />
+  </Target>
 
 </Project>
