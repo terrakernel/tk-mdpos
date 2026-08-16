@@ -989,6 +989,25 @@ blocking anything else.
 
 ### Unmade decisions, not tasks
 
+- **Android.** Asked about 2026-08-16 and deliberately left unbuilt. Nothing is installed on
+  the Windows machine — no SDK, no NDK, no rustup Android targets, no `cargo-ndk`, no .NET
+  Android workload — so this is greenfield rather than half-done.
+
+  **The blocking question is who consumes it, not how to build it.** The two paths share
+  almost nothing beyond producing a `.so`: a Kotlin/Java app wants an AAR on Maven Central
+  bound through JNI or JNA, while .NET for Android wants `android-*` RIDs added to the
+  existing NuGet package. The second is the smaller diff and the larger trap — reaching
+  `sendRAWData` on the Sunmi/iMin/Telpo handhelds means binding a Java AIDL service from
+  C#, and *that* is the work, not the native library.
+
+  Decided in advance for whenever it happens: **`arm64-v8a` and `x86_64` only** (Julian).
+  arm64 covers every current handheld, x86_64 is for the emulator so developers can run it.
+  `armeabi-v7a` is excluded — a slice is a support claim, and nobody has named a 32-bit
+  target device.
+
+  See the README's Android section for the build commands and the corrected 16 KB
+  page-size note. Short version: NDK r28+ needs no alignment flags at all.
+
 - Publishing `tk-mdpos-cli` and `tk-mdpos-ffi`. Never published; that is a decision nobody
   has made rather than an oversight.
 - tvOS, watchOS, visionOS and Mac Catalyst slices in the XCFramework. `rustup` offers the
