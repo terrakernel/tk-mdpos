@@ -436,16 +436,26 @@ val bytes: ByteArray = mdposRender(template, profile)
 sunmiPrinterService.sendRAWData(bytes, null)   // Sunmi, iMin, Telpo — same shape
 ```
 
-> **16KB page size.** Android 15+ requires 16KB-aligned native libraries, and Rust does not
-> do it for you:
+> **16 KB page size.** Re-checked against the Android documentation on 2026-08-16, and the
+> earlier version of this note was wrong in three ways:
 >
-> ```
-> -C link-arg=-Wl,-z,max-page-size=16384
-> ```
+> - **NDK r28 and newer align to 16 KB by default.** With a current NDK there is nothing to
+>   do. Only r27 and older need linker flags — and they need *two*, not one:
 >
-> The trap is that omitting it **passes local testing and fails Play review**. Check the
-> current Play policy rather than trusting this note — the deadlines here have moved more
-> than once.
+>   ```
+>   -C link-arg=-Wl,-z,max-page-size=16384
+>   -C link-arg=-Wl,-z,common-page-size=16384
+>   ```
+>
+> - The Google Play requirement is **1 February 2027**, for apps targeting Android 15
+>   (API 35) and higher. After it, non-compliant apps cannot ship updates.
+>
+> - It applies to **64-bit ABIs only** — `arm64-v8a` and `x86_64`. `armeabi-v7a` is not
+>   subject to it.
+>
+> The trap is unchanged: on an older NDK, omitting the flags **passes local testing and
+> fails Play review**. This deadline has now moved three times, so verify it rather than
+> trusting this note.
 
 ### iOS
 
