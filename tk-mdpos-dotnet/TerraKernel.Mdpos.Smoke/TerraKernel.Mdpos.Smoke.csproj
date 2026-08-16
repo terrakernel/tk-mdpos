@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>TerraKernel.Mdpos.Smoke</RootNamespace>
+
+    <!-- The library targets net8.0 (LTS) for reach, but a machine may only carry a newer
+         runtime. Rolling forward keeps the harness runnable anywhere, and incidentally
+         exercises the net8.0 assembly on a later runtime, which is what most consumers
+         will actually do. -->
+    <RollForward>LatestMajor</RollForward>
+  </PropertyGroup>
+
+  <!-- Against the local sources. To run the same checks against the *packed* package
+       instead — which is the only thing that proves runtimes/{rid}/native/ resolves —
+       copy Program.cs into a throwaway project and PackageReference TerraKernel.Mdpos. -->
+  <ItemGroup>
+    <ProjectReference Include="../TerraKernel.Mdpos/TerraKernel.Mdpos.csproj" />
+  </ItemGroup>
+
+  <!-- Lets the harness find tests/golden/ without depending on the working directory. -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>RepoRoot</_Parameter1>
+      <_Parameter2>$(MSBuildThisFileDirectory)../../</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <!-- The native binary the P/Invoke needs at runtime. Staged by stage-native.ps1 (or by
+       CI); named per host because DllImport("tk_mdpos") resolves tk_mdpos.dll on Windows
+       and libtk_mdpos.so on Linux. -->
+  <ItemGroup>
+    <None Include="../runtimes/win-x64/native/tk_mdpos.dll"
+          Condition="Exists('$(MSBuildThisFileDirectory)../runtimes/win-x64/native/tk_mdpos.dll') And '$(OS)' == 'Windows_NT'"
+          CopyToOutputDirectory="PreserveNewest"
+          Link="tk_mdpos.dll" />
+
+    <None Include="../runtimes/linux-x64/native/libtk_mdpos.so"
+          Condition="Exists('$(MSBuildThisFileDirectory)../runtimes/linux-x64/native/libtk_mdpos.so') And '$(OS)' != 'Windows_NT'"
+          CopyToOutputDirectory="PreserveNewest"
+          Link="libtk_mdpos.so" />
+  </ItemGroup>
+
+</Project>

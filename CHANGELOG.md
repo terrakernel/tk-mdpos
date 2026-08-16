@@ -9,6 +9,49 @@ API and carries the compatibility promise: the engine may be rewritten freely, b
 template must render identically in perpetuity. A major bump here does not license a change
 in how an existing template prints.
 
+## [Unreleased]
+
+### Added
+
+- **NuGet package `TerraKernel.Mdpos`**, in `tk-mdpos-dotnet/`. A `net8.0` wrapper over the
+  C ABI with no managed dependencies, carrying native binaries for `win-x64` and
+  `linux-x64` — that is the whole claim. Apple platforms continue to ship as an XCFramework
+  through the Swift package rather than through NuGet, and `android-*` is deliberately
+  absent despite Android being the largest target hardware.
+
+  `Mdpos.Render` returns `byte[]`; `Preview` and `PreviewHtml` return `string`. The native
+  buffer never escapes the wrapper, so the free-exactly-once rule is structural rather than
+  something callers have to honour. Every template rejection is a single `MdposException`
+  carrying the source line, because the message is the useful half of a rejection.
+
+  Verified by rendering the entire golden corpus through the wrapper and comparing against
+  `expected.bin` byte-for-byte — both against local sources and against the packed `.nupkg`
+  consumed from a clean project, which is the only thing that proves the native asset
+  actually resolves.
+
+  **Verified on hardware**: a receipt printed from the packaged package on an Epson TM-T82X
+  over port 9100, with a double-width centred header, prices flush at column 48, a wrapped
+  product name with a hanging indent, a double-width total row also flush right, a scannable
+  QR, and a clean partial cut.
+
+- **CI.** `.github/workflows/ci.yml` runs tests, clippy, the `smoke.c` ABI check and a C++
+  header compile across Linux, macOS and Windows, plus ASan over `smoke.c`, an MSRV job at
+  1.85, and a packaged-crate test. `.github/workflows/release-nuget.yml` builds each RID
+  natively on its own runner, packs, verifies by consuming the package on both RIDs, and
+  publishes on a `vX.Y.Z` tag.
+
+  `smoke.c` was previously the only check on header drift and ran when someone remembered.
+  The Windows leg is verified rather than assumed: the required system libraries are
+  `kernel32 ntdll userenv ws2_32 dbghelp`, which is not what was guessed.
+
+### Fixed
+
+- **`.gitattributes` pins the tree to LF.** A Windows clone with the default
+  `core.autocrlf=true` checked out the golden fixtures as CRLF and failed every fixture
+  compared against LF output, and gave `build-xcframework.sh` a CRLF shebang that macOS
+  rejects as a bad interpreter. No engine behaviour was involved — templates themselves
+  are unaffected, since the parser splits with `str::lines()` and strips a trailing `\r`.
+
 ## [0.3.0] — 2026-08-16
 
 First release distributed for Apple platforms as well as crates.io.

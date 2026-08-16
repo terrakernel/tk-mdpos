@@ -1,0 +1,206 @@
+# NuGet release
+#
+# This workflow exists because neither shipped RID can be built on a development machine.
+# The Mac cannot produce win-x64 (needs MSVC) or linux-x64 (needs a cross linker or a
+# container); the Windows machine has no WSL, so it cannot produce linux-x64 either. Both
+# runners here are x86-64, so each target builds *natively* on its own runner and there is
+# no cross-compilation anywhere. Keep it that way — a native build per runner is why this
+# job stays simple.
+#
+# RIDs are win-x64 and linux-x64. That is the whole claim. android-* is deliberately not
+# shipped despite Android being the largest target hardware, and osx-* is absent because
+# Apple platforms ship as an XCFramework through a Swift package instead. Do not add a RID
+# because a runner could produce it: a RID is a support claim.
+name: NuGet release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Push to nuget.org (otherwise build and verify only)'
+        type: boolean
+        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  native:
+    name: native ${{ matrix.rid }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            artifact: tk_mdpos.dll
+          - os: ubuntu-latest
+            rid: linux-x64
+            artifact: libtk_mdpos.so
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # The cdylib is what ships: DllImport("tk_mdpos") resolves tk_mdpos.dll and
+      # libtk_mdpos.so with no per-platform naming in the C# wrapper. That is the tk-
+      # crate-naming convention reaching into the C ABI and paying off.
+      - name: Build the C ABI
+        run: cargo build -p tk-mdpos-ffi --release
+
+      - name: Verify the ABI before packaging it
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -f "target/release/${{ matrix.artifact }}"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-${{ matrix.rid }}
+          path: target/release/${{ matrix.artifact }}
+          if-no-files-found: error
+
+  pack:
+    name: pack
+    needs: native
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '8.0.x'
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: native-win-x64
+          path: tk-mdpos-dotnet/runtimes/win-x64/native
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: native-linux-x64
+          path: tk-mdpos-dotnet/runtimes/linux-x64/native
+
+      # No MdposAllowMissingRuntimes here, deliberately. Both binaries are present or the
+      # pack fails: a package that claims a RID it carries no binary for must not be
+      # producible by this job.
+      - name: Pack
+        run: dotnet pack tk-mdpos-dotnet/TerraKernel.Mdpos -c Release -o nupkg
+
+      - name: Show what was packed
+        run: unzip -l nupkg/*.nupkg
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nupkg
+          path: nupkg/*.nupkg
+          if-no-files-found: error
+
+  verify:
+    name: consume on ${{ matrix.rid }}
+    needs: pack
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '8.0.x'
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: nupkg
+          path: nupkg
+
+      # `dotnet pack` succeeding proves nothing about whether the native asset resolves.
+      # runtimes/{rid}/native/ is the layout that fails silently: a wrong path produces no
+      # build error and a DllNotFoundException on the consumer's machine. Consuming the
+      # packed package from a clean project on each claimed RID is the only real check —
+      # and since the shipped binaries cannot be built or run on the development machines
+      # at all, this job is the only place they are ever executed before a user gets them.
+      - name: Consume the packed package from a clean project
+        shell: bash
+        run: |
+          set -euxo pipefail
+          version=$(ls nupkg/*.nupkg | sed -E 's/.*TerraKernel\.Mdpos\.(.*)\.nupkg/\1/')
+          mkdir -p /tmp/consumer && cd /tmp/consumer
+
+          cat > NuGet.config <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="local" value="LOCALFEED" />
+            </packageSources>
+          </configuration>
+          XML
+          sed -i.bak "s|LOCALFEED|${GITHUB_WORKSPACE}/nupkg|" NuGet.config
+
+          cat > Consumer.csproj <<XML
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <OutputType>Exe</OutputType>
+              <TargetFramework>net8.0</TargetFramework>
+              <Nullable>enable</Nullable>
+              <ImplicitUsings>enable</ImplicitUsings>
+              <RollForward>LatestMajor</RollForward>
+            </PropertyGroup>
+            <ItemGroup>
+              <PackageReference Include="TerraKernel.Mdpos" Version="${version}" />
+            </ItemGroup>
+            <ItemGroup>
+              <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+                <_Parameter1>RepoRoot</_Parameter1>
+                <_Parameter2>${GITHUB_WORKSPACE}/</_Parameter2>
+              </AssemblyAttribute>
+            </ItemGroup>
+          </Project>
+          XML
+
+          # The same harness the repo runs against local sources, now pointed at the packed
+          # package. It renders the golden corpus through the whole stack — C# wrapper,
+          # P/Invoke, C ABI, Rust engine — and compares against bytes a real Epson TM-T82X
+          # has printed correctly.
+          cp "${GITHUB_WORKSPACE}/tk-mdpos-dotnet/TerraKernel.Mdpos.Smoke/Program.cs" Program.cs
+          dotnet run
+
+  publish:
+    name: publish to nuget.org
+    needs: verify
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.publish
+    runs-on: ubuntu-latest
+    environment: nuget
+    steps:
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '8.0.x'
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: nupkg
+          path: nupkg
+
+      - name: Push
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NUGET_API_KEY}" ]; then
+            echo "NUGET_API_KEY is not set for the 'nuget' environment." >&2
+            exit 1
+          fi
+          dotnet nuget push nupkg/*.nupkg \
+            --api-key "${NUGET_API_KEY}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate

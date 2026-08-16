@@ -381,6 +381,30 @@ cc -Itk-mdpos-ffi/include tk-mdpos-ffi/tests/smoke.c target/debug/libtk_mdpos.a 
 That C smoke test is what verifies the header still matches the compiled ABI; the Rust
 tests cannot catch header drift.
 
+## .NET
+
+```
+dotnet add package TerraKernel.Mdpos
+```
+
+```csharp
+using TerraKernel.Mdpos;
+
+byte[] bytes = Mdpos.Render(template, PrinterProfile.Epson80mm);
+
+using var client = new TcpClient("192.168.1.50", 9100);
+client.GetStream().Write(bytes);
+```
+
+A `net8.0` wrapper over the C ABI with no managed dependencies, carrying native binaries for
+**win-x64** and **linux-x64**. The native buffer never escapes the wrapper, so there is no
+handle to release and no free-exactly-once rule for you to honour. Template rejections come
+back as a single `MdposException` carrying the source line.
+
+Source is in [`tk-mdpos-dotnet/`](tk-mdpos-dotnet/). Apple platforms are served by the Swift
+package (`Package.swift`, consumed as an XCFramework `binaryTarget`) rather than by NuGet,
+so there are no `osx-*` runtime identifiers here.
+
 ## Android and iOS
 
 Nothing below has been built or verified yet — no cross targets are installed and there are

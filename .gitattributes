@@ -1,0 +1,56 @@
+# Line endings are load-bearing in this repository, so they are pinned rather than left
+# to each clone's core.autocrlf. Without this file a Windows clone (autocrlf=true) checks
+# out every text file as CRLF, and three separate things break:
+#
+#   - the golden fixtures fail, because expected.txt / expected.html are compared
+#     byte-for-byte against output the engine emits with LF;
+#   - build-xcframework.sh gets a CRLF shebang, which macOS reports as a bad interpreter;
+#   - Package.swift and the C sources churn in every diff.
+#
+# Templates themselves are unaffected either way: parse.rs splits with str::lines(), which
+# strips a trailing \r. That is a property worth keeping, since templates live in database
+# rows and are edited on Windows.
+
+* text=auto eol=lf
+
+# --- golden corpus ---------------------------------------------------------------------
+#
+# This directory is the seed of the conformance corpus and the customer-facing
+# compatibility test, so its bytes are the assertion. Text fixtures stay LF *and* stay
+# diffable, because a regenerated fixture is reviewed by hand before it is committed.
+
+tests/golden/**/input.tmpl   text eol=lf
+tests/golden/**/expected.txt  text eol=lf
+tests/golden/**/expected.html text eol=lf
+tests/golden/**/expected.err  text eol=lf
+
+# ESC/POS output contains embedded NULs and 0x0A bytes that are data, not line endings.
+# Git's heuristic already guesses binary here; saying so explicitly removes the guess.
+tests/golden/**/expected.bin  binary
+
+# --- toolchain -------------------------------------------------------------------------
+
+*.sh          text eol=lf
+*.swift       text eol=lf
+*.h           text eol=lf
+*.c           text eol=lf
+*.modulemap   text eol=lf
+*.rs          text eol=lf
+*.toml        text eol=lf
+*.ron         text eol=lf
+*.md          text eol=lf
+
+# Windows-only build helpers, if any are ever added, want CRLF.
+*.bat         text eol=crlf
+*.cmd         text eol=crlf
+
+# --- binaries --------------------------------------------------------------------------
+
+*.zip         binary
+*.xcframework binary
+*.a           binary
+*.lib         binary
+*.dll         binary
+*.so          binary
+*.dylib       binary
+*.nupkg       binary
