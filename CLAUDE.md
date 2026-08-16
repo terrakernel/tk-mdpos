@@ -636,6 +636,59 @@ someone asking — a slice is a support claim.
 been chosen. `target/` is gitignored, so the bundle is a build output rather than a committed
 artifact.
 
+## NuGet package — not started
+
+Next work item, to be done on a Windows machine. Nothing exists yet: no `.csproj`, no C#
+source, no package ID reserved. What follows is the constraints and the open decisions, not
+a design.
+
+### Do not copy the Swift answer across
+
+`Package.swift` sits at the repo root because **SwiftPM forced it** — a package dependency is
+a git URL with no subpath. NuGet has no such constraint: a `.csproj` lives happily in a
+subdirectory or a separate repo. So the same-repo reasoning has to be made again on its own
+merits rather than inherited. The argument that carried it for Swift — the manifest's
+checksum referring to an artifact from the same commit — is *weaker* here, because the native
+binaries come from CI rather than from the committed tree.
+
+### Three open decisions
+
+- **Where the C# project lives.** Same repo (probably `tk-mdpos-dotnet/`) or separate. See
+  above; this is genuinely open.
+- **Raw P/Invoke or an idiomatic wrapper.** A thin `static class` of `DllImport` declarations
+  is honest and tiny; a wrapper buys `SafeHandle` for the buffer contract and turns status
+  codes into exceptions. Leaning wrapper, because the free-exactly-once rule is the kind of
+  thing a GC'd language should own rather than delegate to callers — but not decided.
+- **Package ID.** `TerraKernel.Mdpos` follows the existing `TerraKernel.OdxClient`, and keeps
+  the naming rule that a prefix belongs wherever the namespace is shared. NuGet is a shared
+  registry, so it takes the entity name as its disambiguator, exactly as `tk-` does on
+  crates.io.
+
+### Facts that constrain the work
+
+- **RIDs are `win-x64` and `linux-x64`.** Nothing else — see the CI section.
+- **On a Windows machine `win-x64` builds natively, `linux-x64` does not.** WSL is the
+  obvious local route for the second; otherwise it waits for CI. Do not reach for a
+  cross-linker on Windows before trying WSL.
+- **`runtimes/{rid}/native/` is the layout that fails silently.** Wrong path means no build
+  error and a P/Invoke failure on someone else's machine. The check is consuming the packed
+  `.nupkg` from a clean throwaway project per RID, never `dotnet pack` succeeding.
+- **`DllImport("tk_mdpos")` resolves `tk_mdpos.dll` and `libtk_mdpos.so` automatically** on
+  modern .NET. No per-platform naming needed in C#.
+- **The buffer contract is the whole ABI risk.** Every buffer — including the one returned
+  alongside an error — must go back through `tk_mdpos_free` and never `free()`. `len`
+  excludes the trailing NUL.
+- **Byte output contains embedded NULs; HTML output does not.** So `render` results must be
+  copied with `Marshal.Copy` using `len`, while `preview` and `preview_html` may legitimately
+  use `Marshal.PtrToStringUTF8`. Getting this backwards truncates receipts at the first
+  `GS V 66 0`.
+- **The ABI is documented thread-safe and reentrant**, buffers may be freed on a different
+  thread than produced them, and one profile may be shared by concurrent callers. A wrapper
+  should not add a lock.
+- **Errors are five status codes plus a message.** Every template rejection is
+  `TK_MDPOS_ERR_TEMPLATE` with the source line in the buffer. Typed exceptions per syntax
+  error would be surface area for no gain — one exception type carrying the message is right.
+
 ## Releasing
 
 Done by hand for 0.3.0 (2026-08-16) and validated end to end. Automate this as a workflow
