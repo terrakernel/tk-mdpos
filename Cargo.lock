@@ -92,7 +92,7 @@ dependencies = [
 
 [[package]]
 name = "tk-mdpos"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ron",
  "serde",
@@ -102,14 +102,14 @@ dependencies = [
 
 [[package]]
 name = "tk-mdpos-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "tk-mdpos",
 ]
 
 [[package]]
 name = "tk-mdpos-ffi"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "tk-mdpos",
 ]

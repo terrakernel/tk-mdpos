@@ -3,7 +3,7 @@ members = ["tk-mdpos", "tk-mdpos-cli", "tk-mdpos-ffi"]
 resolver = "3"
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Julian Wajong <jwajong@terrakernel.com>"]
 edition = "2024"
 rust-version = "1.85"
@@ -11,7 +11,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/terrakernel/tk-mdpos"
 
 [workspace.dependencies]
-tk-mdpos = { path = "tk-mdpos", version = "0.2.0" }
+tk-mdpos = { path = "tk-mdpos", version = "0.3.0" }
 unicode-width = "0.2"
 
 # Panics unwinding across a C frame are undefined behaviour, so tk-mdpos-ffi wraps every
@@ -19,3 +19,24 @@ unicode-width = "0.2"
 # remove the net silently. Pinned here so it cannot be flipped for a size win.
 [profile.release]
 panic = "unwind"
+
+# Shipped binaries carry no DWARF. A debugger cannot step into this library usefully
+# anyway — the caller sees a C ABI, and anyone debugging the internals builds from source.
+# "debuginfo" and not "symbols": the tk_mdpos_* globals must survive for the linker.
+#
+# Be precise about what this does, because two plausible-sounding claims are both false:
+#
+#   - It does NOT shrink the macOS cdylib. Verified: the linked .dylib has zero __DWARF
+#     segments, because Mach-O leaves debug info in the object files and the dSYM rather
+#     than the image. The setting is a no-op there. It is kept for the Linux .so, where
+#     ELF does embed DWARF and this is the NuGet payload — expected to help, not measured
+#     from this machine.
+#   - It does NOT reach the staticlib at all. Cargo implements `strip` as a link-time
+#     rustc flag and an ar archive is never linked. The DWARF in libtk_mdpos.a is std's,
+#     bundled in from its precompiled objects, and `strip -S` in
+#     tk-mdpos-ffi/build-xcframework.sh is what removes it — 28 MB of zipped XCFramework
+#     down to 20 MB. That is the change that actually mattered.
+#
+# Only affects artifacts built from this workspace; a downstream crate compiles tk-mdpos
+# under its own profile.
+strip = "debuginfo"

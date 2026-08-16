@@ -9,9 +9,18 @@ API and carries the compatibility promise: the engine may be rewritten freely, b
 template must render identically in perpetuity. A major bump here does not license a change
 in how an existing template prints.
 
-## [Unreleased]
+## [0.3.0] — 2026-08-16
+
+First release distributed for Apple platforms as well as crates.io.
 
 ### Added
+
+- **Swift package.** `Package.swift` at the repository root declares a `binaryTarget`
+  pointing at `TkMdpos.xcframework.zip` on this release, so Xcode and SwiftPM can consume
+  the C ABI directly. The manifest must sit at the root because a SwiftPM dependency is a
+  git URL with no subpath; it shares the repo with the Rust workspace so the checksum always
+  refers to an artifact built from the same commit. Verified by building and running a Swift
+  consumer against the framework — `import TkMdpos`, render, HTML preview, and free.
 
 - **HTML preview backend.** `preview_html()` returns a self-contained fragment — one
   `<div>` carrying its own scoped `<style>` — so it can be embedded in a host page or
@@ -56,6 +65,14 @@ in how an existing template prints.
   links `tests/smoke.c` against the finished bundle before reporting success, because a
   framework that assembled is not a framework that links. Not published anywhere yet; the
   distribution route is undecided.
+
+### Changed
+
+- Release artifacts are stripped of debug info. `strip -S` on the static archives took the
+  zipped XCFramework from 28 MB to 20 MB — the DWARF is std's, arriving with its precompiled
+  objects. Cargo's `strip` profile setting does not reach a staticlib (it is a link-time
+  flag, and an ar archive is never linked), so the two mechanisms are separate and both are
+  documented where they apply.
 
 ### Fixed
 

@@ -4,3 +4,9 @@
 *.txt.actual
 .DS_Store
 /.idea/
+
+# SwiftPM. Package.swift is tracked; everything it generates is not, and the
+# XCFramework it points at is a release asset that must never enter git history.
+/.build/
+/.swiftpm/
+Package.resolved

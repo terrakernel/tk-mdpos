@@ -55,11 +55,22 @@ mkdir -p "$STAGE"/{macos,ios,sim,Headers}
 # `import TkMdpos` instead of dropping to a bridging header.
 cp tk-mdpos-ffi/include/tk_mdpos.h tk-mdpos-ffi/include/module.modulemap "$STAGE/Headers/"
 
+# Combine the per-architecture archives, then drop debug symbols.
+#
+# The `strip = "debuginfo"` in the workspace profile does *not* reach a staticlib: cargo
+# implements it as a link-time rustc flag and an ar archive is never linked. The DWARF is
+# std's, bundled in from its precompiled objects, and it is roughly a third of the payload:
+# the zipped xcframework measured 28 MB before this and 20 MB after. `-S` removes debug
+# symbols only; stripping
+# globals would take the tk_mdpos_* entry points with them and the archive would link to
+# nothing. The smoke-test link at the end of this script is what catches that if it is ever
+# changed to a broader flag.
 fatten() {
     local dest="$1"; shift
     local inputs=()
     for t in "$@"; do inputs+=("target/$t/release/libtk_mdpos.a"); done
     lipo -create "${inputs[@]}" -output "$dest"
+    strip -S "$dest"
 }
 
 fatten "$STAGE/macos/libtk_mdpos.a" "${MACOS_TARGETS[@]}"
@@ -83,8 +94,26 @@ cc -Wall -Wextra -I"$OUT/macos-arm64_x86_64/Headers" \
     tk-mdpos-ffi/tests/smoke.c -o "$STAGE/smoke"
 "$STAGE/smoke" >/dev/null
 
+# Zip and checksum here rather than by hand, because both details bite quietly.
+#
+# `ditto --sequesterRsrc` is what Apple's docs show, but it writes a __MACOSX/ directory
+# beside the framework; a static-library xcframework has no resource forks or symlinks for
+# it to preserve, so it is pure noise. Plain `zip -r` from inside target/ puts the bundle at
+# the archive root, which is where binaryTarget expects it.
+#
+# The checksum belongs to *these bytes*. Rebuilding after computing it produces a different
+# archive and Package.swift silently stops matching, so the two steps stay adjacent and the
+# zip that is uploaded must be this one.
+rm -f "$OUT.zip"
+( cd "$(dirname "$OUT")" && zip -qr "$(basename "$OUT").zip" "$(basename "$OUT")" )
+
 echo
 echo "wrote $OUT"
 for d in "$OUT"/*/; do
     printf '  %-30s %s\n' "$(basename "$d")" "$(lipo -archs "$d/libtk_mdpos.a")"
 done
+echo
+echo "wrote $OUT.zip ($(du -h "$OUT.zip" | cut -f1))"
+echo "  checksum $(swift package compute-checksum "$OUT.zip")"
+echo
+echo "Upload THIS zip. A rebuild invalidates the checksum above."
