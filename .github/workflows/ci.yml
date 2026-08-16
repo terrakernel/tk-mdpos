@@ -1,0 +1,174 @@
+# CI
+#
+# The Rust tests are the least interesting part of this workflow. There are no platform
+# branches anywhere in the three crates — no cfg(target…), cfg(windows) or cfg(unix) — so
+# the matrix is not testing library logic. It tests the C toolchain integration and the
+# artifact naming, which is what breaks for a consumer rather than for us.
+#
+# tests/smoke.c is the only check that catches the hand-written header drifting from the
+# compiled library, and it is deliberately not part of `cargo test`. Before this workflow
+# existed it ran when someone remembered: the `template`-as-a-parameter-name bug shipped in
+# 0.1, made the header uncompilable from C++ despite its extern "C" guards, and survived
+# until August because nothing checked it.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Golden fixtures are compared byte-for-byte against LF output. .gitattributes pins
+      # them, so a CRLF checkout here means the attributes are wrong rather than the engine.
+      - name: Check out with LF endings
+        run: git config core.autocrlf false
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build the C ABI
+        run: cargo build -p tk-mdpos-ffi
+
+      # --- the check this workflow exists for ---------------------------------------------
+
+      - name: C smoke test + C++ header check (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          set -euxo pipefail
+          cc -Wall -Wextra -Itk-mdpos-ffi/include tk-mdpos-ffi/tests/smoke.c \
+             target/debug/libtk_mdpos.a -o smoke
+          ./smoke
+          # Parameter names are documentation only, but a C++ keyword among them makes the
+          # header uncompilable from C++. Cheap, and it is the check that was missing.
+          printf '#include "tk_mdpos.h"\nint main(void){return 0;}\n' > hdr_tu.cpp
+          c++ -Wall -Wextra -Itk-mdpos-ffi/include -fsyntax-only hdr_tu.cpp
+
+      # Everything in the Unix step assumes a toolchain Windows does not have: there is no
+      # `cc`, the staticlib is tk_mdpos.lib rather than libtk_mdpos.a, and linking it needs
+      # the system libs rustc reports. Verified locally on 2026-08-16.
+      #
+      # If a rustc upgrade changes the required libs, refresh them with:
+      #   cargo rustc -p tk-mdpos-ffi --lib -- --print native-static-libs
+      - name: C smoke test + C++ header check (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
+          if errorlevel 1 exit /b 1
+          cl /nologo /W4 /I tk-mdpos-ffi\include tk-mdpos-ffi\tests\smoke.c target\debug\tk_mdpos.lib kernel32.lib ntdll.lib userenv.lib ws2_32.lib dbghelp.lib /Fe:smoke.exe
+          if errorlevel 1 exit /b 1
+          smoke.exe
+          if errorlevel 1 exit /b 1
+          echo #include "tk_mdpos.h" > hdr_tu.cpp
+          echo int main(void) { return 0; } >> hdr_tu.cpp
+          cl /nologo /W4 /EHsc /I tk-mdpos-ffi\include /c hdr_tu.cpp /Fo:hdr_tu.obj
+          if errorlevel 1 exit /b 1
+
+  asan:
+    name: AddressSanitizer over smoke.c
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The allocation contract is the whole ABI risk: every buffer must go back through
+      # tk_mdpos_free and never free(), and `cap` has to round-trip so Vec::from_raw_parts
+      # can rebuild the allocation exactly. ASan is what actually validates that.
+      - name: Build and run under ASan
+        run: |
+          set -euxo pipefail
+          cargo build -p tk-mdpos-ffi
+          clang -Wall -Wextra -fsanitize=address -g \
+                -Itk-mdpos-ffi/include tk-mdpos-ffi/tests/smoke.c \
+                target/debug/libtk_mdpos.a -o smoke-asan
+          ./smoke-asan
+
+  msrv:
+    name: MSRV 1.85
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-version in the workspace manifest claims 1.85 and nothing currently verifies
+      # the claim. Edition 2024 needs exactly this, so the floor is real rather than chosen.
+      - name: Install 1.85
+        run: rustup toolchain install 1.85 --profile minimal
+
+      - name: Build at the claimed floor
+        run: cargo +1.85 build --workspace
+
+  package:
+    name: packaged crate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Never `cargo publish --dry-run`. Its verify step only builds the lib: it never
+      # builds or runs tests and never checks that the licence and readme files exist, so
+      # it passed cleanly on 0.1.0 while three defects shipped. Testing the *packaged*
+      # crate is what catches them.
+      - name: Test the packaged crate
+        run: |
+          set -euxo pipefail
+          cargo package -p tk-mdpos
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="tk-mdpos"))')
+          cd "target/package/tk-mdpos-${version}"
+          cargo test
+          cargo test --features serde
+
+  dotnet:
+    name: NuGet package (win-x64 asset)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # The package version is not derived from Cargo.toml, so it can ship stale silently:
+      # one git tag serves the crate, the GitHub release, the Swift package and this, and
+      # nothing else would notice them diverging.
+      - name: Version must match the Rust workspace
+        shell: pwsh
+        run: |
+          $cargo = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          $xml = [xml](Get-Content tk-mdpos-dotnet/TerraKernel.Mdpos/TerraKernel.Mdpos.csproj)
+          $csproj = ($xml.Project.PropertyGroup | Where-Object { $_.Version }).Version
+          Write-Host "Cargo.toml: $cargo   csproj: $csproj"
+          if ($cargo -ne $csproj) {
+            Write-Error "Version drift: Cargo.toml says $cargo but TerraKernel.Mdpos.csproj says $csproj. Bump both."
+            exit 1
+          }
+
+      # Only the host RID is available on one runner, so this cannot produce a publishable
+      # package — release-nuget.yml gathers both. What it does prove on every push is that
+      # the wrapper still matches the ABI and that the corpus still renders identically
+      # through it, which is the half that breaks when the Rust side moves.
+      - name: Stage the native binary
+        shell: pwsh
+        run: ./tk-mdpos-dotnet/stage-native.ps1
+
+      - name: Run the .NET smoke harness
+        run: dotnet run --project tk-mdpos-dotnet/TerraKernel.Mdpos.Smoke -c Release
+
+      - name: Pack (win-x64 only — never published)
+        run: dotnet pack tk-mdpos-dotnet/TerraKernel.Mdpos -c Release -o nupkg -p:MdposAllowMissingRuntimes=true

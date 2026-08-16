@@ -10,3 +10,14 @@
 /.build/
 /.swiftpm/
 Package.resolved
+
+# .NET. The C# sources are tracked; build output is not.
+#
+# runtimes/ holds the native binaries the NuGet package carries. They are cargo output
+# staged by stage-native.ps1 or by CI, never committed — a checked-in binary would go
+# stale silently against the header it is supposed to match.
+[Bb]in/
+[Oo]bj/
+/tk-mdpos-dotnet/runtimes/
+/tk-mdpos-dotnet/artifacts/
+*.nupkg

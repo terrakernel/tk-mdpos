@@ -1,0 +1,93 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- LibraryImport generates the marshalling stubs; the ABI is all blittable types
+         and raw pointers, so the generated code is trim- and AOT-safe. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsAotCompatible>true</IsAotCompatible>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <!-- ==== package identity ============================================================
+       The ID takes the entity name as its disambiguator, matching TerraKernel.OdxClient:
+       NuGet is a shared registry, exactly as crates.io is, which is what the `tk-` prefix
+       is doing on the Rust side.
+
+       Version must move with [workspace.package] version in the repo-root Cargo.toml.
+       One tag serves the crate, the GitHub release, the Swift package and this. -->
+  <PropertyGroup>
+    <PackageId>TerraKernel.Mdpos</PackageId>
+    <Version>0.3.0</Version>
+    <Authors>Julian Wajong</Authors>
+    <Company>TerraKernel</Company>
+    <Description>Turn a formatted template string into ESC/POS receipt bytes. Layout lives in a string that can sit in a database row, so changing a receipt footer is a data edit rather than a redeploy. Produces bytes only — no I/O, no transport.</Description>
+    <PackageTags>escpos;receipt;printer;pos;thermal-printer;epson;qr</PackageTags>
+    <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/terrakernel/tk-mdpos</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/terrakernel/tk-mdpos</PackageProjectUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+  <!-- ==== native payload ==============================================================
+       RIDs are win-x64 and linux-x64. That is the whole claim: android-* is deliberately
+       not shipped despite Android being the largest target hardware, and osx-* is absent
+       because Apple platforms ship through an XCFramework and a Swift package instead.
+       Do not add a RID because a runner could produce one — a RID is a support claim.
+
+       Binaries are staged into tk-mdpos-dotnet/runtimes/ by CI (or by stage-native.ps1
+       for a local win-x64 build). They are build outputs and are not committed. -->
+  <PropertyGroup>
+    <MdposRuntimesDir>$(MSBuildThisFileDirectory)../runtimes/</MdposRuntimesDir>
+    <MdposWindowsNative>$(MdposRuntimesDir)win-x64/native/tk_mdpos.dll</MdposWindowsNative>
+    <MdposLinuxNative>$(MdposRuntimesDir)linux-x64/native/libtk_mdpos.so</MdposLinuxNative>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(MdposWindowsNative)"
+          Condition="Exists('$(MdposWindowsNative)')"
+          Pack="true"
+          PackagePath="runtimes/win-x64/native/"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false" />
+
+    <None Include="$(MdposLinuxNative)"
+          Condition="Exists('$(MdposLinuxNative)')"
+          Pack="true"
+          PackagePath="runtimes/linux-x64/native/"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false" />
+  </ItemGroup>
+
+  <!-- ==== the check that matters ======================================================
+       A wrong or missing runtimes/{rid}/native/ path produces no build error and no pack
+       error: it fails as a DllNotFoundException on someone else's machine. `dotnet pack`
+       succeeding proves nothing about whether the native asset resolves, so a package
+       that claims a RID it carries no binary for must not be producible by accident.
+
+       The real proof is still consuming the packed .nupkg from a clean project on each
+       RID. This target only catches the cheap half early. -->
+  <Target Name="MdposVerifyNativePayload" BeforeTargets="GenerateNuspec">
+    <Error Condition="'$(MdposAllowMissingRuntimes)' != 'true' And !Exists('$(MdposWindowsNative)')"
+           Text="Cannot pack: the win-x64 native binary is missing at $(MdposWindowsNative). Build it with `cargo build -p tk-mdpos-ffi --release` and stage it (see tk-mdpos-dotnet/stage-native.ps1), or pass -p:MdposAllowMissingRuntimes=true for a local smoke build that must never be published." />
+
+    <Error Condition="'$(MdposAllowMissingRuntimes)' != 'true' And !Exists('$(MdposLinuxNative)')"
+           Text="Cannot pack: the linux-x64 native binary is missing at $(MdposLinuxNative). It cannot be built on Windows without WSL or a container; normally CI produces it natively on ubuntu-latest. Pass -p:MdposAllowMissingRuntimes=true for a local smoke build that must never be published." />
+
+    <Warning Condition="'$(MdposAllowMissingRuntimes)' == 'true'"
+             Text="MdposAllowMissingRuntimes is set: this package may claim a RID it carries no binary for. Do not publish it." />
+  </Target>
+
+</Project>

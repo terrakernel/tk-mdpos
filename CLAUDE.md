@@ -37,6 +37,7 @@ tk-mdpos-cli/              # thin binary, owns all file I/O; installs as `mdpos`
 tk-mdpos-ffi/              # C ABI — cdylib + staticlib, both named libtk_mdpos
   include/tk_mdpos.h       # hand-written header, kept in step with src/lib.rs
   tests/smoke.c            # links the real staticlib; not part of cargo test
+tk-mdpos-dotnet/           # NuGet package TerraKernel.Mdpos — net8.0, no dependencies
 tests/golden/              # 6 fixtures, structured as if publishable
 ```
 
@@ -72,7 +73,22 @@ cc -Wall -Wextra -Itk-mdpos-ffi/include tk-mdpos-ffi/tests/smoke.c target/debug/
 # Needs nightly + rust-src; -Zbuild-std is required or the sanitizer ABI mismatches core.
 RUSTFLAGS="-Zsanitizer=thread" cargo +nightly test -p tk-mdpos-ffi \
   -Zbuild-std --target aarch64-apple-darwin
+
+# .NET. stage-native.ps1 builds the cdylib and puts it where the .csproj expects it;
+# nothing else does, and the harness fails with DllNotFoundException without it.
+./tk-mdpos-dotnet/stage-native.ps1
+dotnet run --project tk-mdpos-dotnet/TerraKernel.Mdpos.Smoke
+
+# Local pack. Refuses without a linux-x64 binary unless overridden — see the NuGet section.
+dotnet pack tk-mdpos-dotnet/TerraKernel.Mdpos -c Release -o nupkg \
+  -p:MdposAllowMissingRuntimes=true
 ```
+
+On Windows PowerShell 5.1, `cargo` writing progress to stderr is wrapped in an ErrorRecord
+and aborts any script running under `$ErrorActionPreference = 'Stop'` even on a successful
+build. `stage-native.ps1` drops to `Continue` around the call and trusts `$LASTEXITCODE`,
+which is the only honest signal from a native command. Any future PowerShell wrapper around
+a Rust or C tool needs the same treatment.
 
 Golden fixtures are regenerated deliberately, never automatically. If a change rewrites a
 `.bin`, that is a v1 compatibility break until proven otherwise — inspect the diff by hand.
@@ -272,6 +288,26 @@ rather than "we support clones."
 The printer answers `DLE EOT` normally, so a caller that wants status polling can have it — it
 is still not this library's job.
 
+**Re-verified through the .NET stack on 2026-08-16**, on an Epson TM-T82X at 192.168.1.41.
+The bytes came from the *packaged* `TerraKernel.Mdpos` consumed from a clean project —
+NuGet package, P/Invoke, C ABI, Rust engine, TCP 9100 — and the paper was confirmed correct
+by Julian: 2x2 centred header, prices flush at column 48, a long product name wrapped with a
+hanging indent, a 2x2 `TOTAL` row also flush right, a scannable QR, and a clean partial cut.
+`DLE EOT 3` after the job reported no error, so the autocutter ran rather than jammed.
+
+Two things worth keeping from that run:
+
+- **The strictly-correct-bytes argument is not sufficient on its own.** The wrapper's output
+  was already byte-identical to `expected.bin`, so the print could not have found a layout
+  bug — but it was still the first time anything from this Windows machine reached paper,
+  and the transport half had never been exercised. Distinguish "the bytes are right" from
+  "the delivery path works"; the corpus proves the first and only hardware proves the second.
+- **The monospace preview is not evidence for a magnified row's right edge.** It draws
+  magnified text at its printed width and then narrow, so the 2x `TOTAL` row ends at column
+  40 in `preview()` while landing flush at 48 on paper. That is documented behaviour, not a
+  discrepancy — but it means a `{size}` row's alignment is only ever settled by the hexdump
+  or by paper. Do not read the preview as a fit check there.
+
 ## Images
 
 Decided 2026-08-15, after a printed test sheet. Images reach the printer as `GS v 0` raster
@@ -465,6 +501,32 @@ that direction, not from ReceiptLine's.
 
 ---
 
+## Line endings
+
+**`.gitattributes` pins the whole tree to LF and is load-bearing. Do not remove it.**
+
+Added 2026-08-16, after a fresh Windows clone with the default `core.autocrlf=true` failed
+`cargo test` on the first run. The golden fixtures are compared byte-for-byte against output
+the engine emits with LF, so a CRLF checkout fails every fixture that has an `expected.txt`
+or `expected.html`. The `.bin` files survived only because git's binary heuristic noticed
+their NUL bytes — they are now marked `binary` explicitly rather than left to a guess.
+
+Two things this also fixes, neither of which would have been noticed from the failing test:
+
+- **`build-xcframework.sh` gets a CRLF shebang**, which macOS reports as a bad interpreter.
+  A Windows clone would have produced a script that could not run on the machine it targets.
+- `Package.swift` and the C sources churn in every diff.
+
+**Templates themselves are unaffected either way**, and that is worth keeping: `parse.rs`
+splits with `str::lines()`, which strips a trailing `\r`. Templates live in database rows
+and get edited on Windows, so a CRLF template is a normal input rather than an error. The
+failure was purely a checkout artifact — no engine behaviour was involved.
+
+Renormalizing an already-cloned tree is fiddly, because `git add --renormalize` only
+rewrites the index and the index was already LF. Converting the working-tree bytes directly
+is the safe route, and `git diff --stat HEAD` reporting only `.gitattributes` afterwards is
+the proof it was done exactly.
+
 ## Testing
 
 Golden files from commit one, both backends snapshotting the same fixture:
@@ -480,11 +542,12 @@ the seed of both the conformance corpus and the customer-facing compatibility te
 Priority cases: basic columns, double-width grid mutation, unicode wrapping, right-align
 overflow rejection. Those are the four places §5 says the engine will be wrong.
 
-## CI — planned, not built
+## CI — built 2026-08-16
 
-There is no `.github/workflows` yet. Agreed 2026-08-15 as the next ABI work item, and
-**deferred to a Windows machine**, because Julian's immediate focus is publishing on the
-Windows platform and the Windows leg is the only genuinely fiddly part.
+`.github/workflows/ci.yml` and `.github/workflows/release-nuget.yml` exist. Written on the
+Windows machine, and **every Windows command in them was run locally first** rather than
+translated from the Unix ones by eye. Neither workflow has yet run on GitHub, so treat the
+first push as debugging; what is no longer guesswork is the toolchain half.
 
 ### Why it is urgent rather than tidy
 
@@ -512,27 +575,46 @@ There are **no platform branches in the Rust at all** (verified: no `cfg(target�
 library logic. It tests the C toolchain integration and artifact naming, which is precisely
 what breaks for a consumer rather than for us.
 
-**The Windows leg is the work.** Everything in "Commands" above assumes Unix:
+**The Windows leg is done and verified (2026-08-16).** Everything in "Commands" above
+assumes Unix; the Windows facts, all confirmed by running them:
 
 - there is no `cc` — use `cl.exe` from a Developer Prompt, or `clang` from LLVM;
 - the staticlib is `tk_mdpos.lib`, not `libtk_mdpos.a`;
 - the cdylib is `tk_mdpos.dll` with **no `lib` prefix**;
-- linking the staticlib needs the usual Windows system libs (`ws2_32`, `userenv`,
-  `advapi32`, `ntdll`, `bcrypt` — `rustc --print native-static-libs` reports the real list
-  for the target, so ask it rather than guessing).
+- `tk_mdpos.dll.lib` also appears — that is the DLL's *import* library, not the staticlib.
+  Linking `smoke.c` against it instead of `tk_mdpos.lib` would produce a binary that needs
+  the DLL at runtime. Do not confuse the two.
 
-A starting point, **unverified — it has never been run on Windows**, so treat the first run
-as debugging rather than as a regression:
+**The system-library list was guessed wrong here and is now measured.** The real answer for
+`x86_64-pc-windows-msvc`:
+
+```
+kernel32.lib ntdll.lib userenv.lib ws2_32.lib dbghelp.lib
+```
+
+`advapi32` and `bcrypt` are *not* required, and `kernel32` and `dbghelp` are — the previous
+note had both halves wrong. Ask the toolchain rather than a blog post, and re-ask after a
+rustc upgrade:
+
+```
+cargo rustc -p tk-mdpos-ffi --lib -- --print native-static-libs
+```
+
+The verified sequence, which is what `ci.yml` runs:
 
 ```
 cargo build -p tk-mdpos-ffi
+call "<vs-install>\VC\Auxiliary\Build\vcvars64.bat"
 cl /W4 /I tk-mdpos-ffi\include tk-mdpos-ffi\tests\smoke.c ^
-   target\debug\tk_mdpos.lib %EXTRA_LIBS% /Fe:smoke.exe
+   target\debug\tk_mdpos.lib kernel32.lib ntdll.lib userenv.lib ws2_32.lib dbghelp.lib ^
+   /Fe:smoke.exe
 smoke.exe
 ```
 
-Confirm the artifact names against `target\debug\` before assuming them; do not copy the
-Unix command and translate it by eye.
+All 23 checks in `smoke.c` pass, the header compiles clean as C++ under `/W4`, and
+`dumpbin /exports` shows all eight `tk_mdpos_*` symbols unmangled in the DLL. Locate
+`vcvars64.bat` through `vswhere.exe` rather than hardcoding a path — on this machine
+Visual Studio is at `D:\MSKDCK`, which no guess would have found.
 
 ### The NuGet release job
 
@@ -636,11 +718,32 @@ someone asking — a slice is a support claim.
 been chosen. `target/` is gitignored, so the bundle is a build output rather than a committed
 artifact.
 
-## NuGet package — not started
+## NuGet package — built 2026-08-16, not yet published
 
-Next work item, to be done on a Windows machine. Nothing exists yet: no `.csproj`, no C#
-source, no package ID reserved. What follows is the constraints and the open decisions, not
-a design.
+Lives in `tk-mdpos-dotnet/`:
+
+```
+TerraKernel.Mdpos/          the package — net8.0, no dependencies
+  NativeMethods.cs          LibraryImport bindings; internal, mirrors tk_mdpos.h by hand
+  PrinterProfile.cs         the native struct, passed across with no marshalling step
+  MdposException.cs         one exception type carrying the message
+  Mdpos.cs                  Render / Preview / PreviewHtml
+TerraKernel.Mdpos.Smoke/    console harness, the C# sibling of tests/smoke.c
+stage-native.ps1            builds the cdylib and stages it under runtimes/{rid}/native/
+README.md                   the nuget.org landing page
+```
+
+Verified on the day: the harness passes against local sources **and** against the packed
+`.nupkg` consumed from a clean throwaway project, where the native asset resolves purely
+through `runtimes/win-x64/native/`. The package ID `TerraKernel.Mdpos` is **not yet
+reserved on nuget.org** — nothing has been pushed.
+
+**The harness renders the whole golden corpus through the C# wrapper and compares against
+`expected.bin` byte-for-byte.** That is the strongest check available: it exercises wrapper,
+P/Invoke, C ABI and Rust engine against bytes a real TM-T82X has printed correctly, so a
+marshalling defect shows up as a byte difference rather than as a plausible receipt. Keep
+that check when changing the wrapper; it is worth more than the hand-written assertions
+above it.
 
 ### Do not copy the Swift answer across
 
@@ -651,28 +754,46 @@ merits rather than inherited. The argument that carried it for Swift — the man
 checksum referring to an artifact from the same commit — is *weaker* here, because the native
 binaries come from CI rather than from the committed tree.
 
-### Three open decisions
+### The three open decisions, settled (Julian, 2026-08-16)
 
-- **Where the C# project lives.** Same repo (probably `tk-mdpos-dotnet/`) or separate. See
-  above; this is genuinely open.
-- **Raw P/Invoke or an idiomatic wrapper.** A thin `static class` of `DllImport` declarations
-  is honest and tiny; a wrapper buys `SafeHandle` for the buffer contract and turns status
-  codes into exceptions. Leaning wrapper, because the free-exactly-once rule is the kind of
-  thing a GC'd language should own rather than delegate to callers — but not decided.
-- **Package ID.** `TerraKernel.Mdpos` follows the existing `TerraKernel.OdxClient`, and keeps
-  the naming rule that a prefix belongs wherever the namespace is shared. NuGet is a shared
-  registry, so it takes the entity name as its disambiguator, exactly as `tk-` does on
-  crates.io.
+- **Same repo, `tk-mdpos-dotnet/`.** Not by inheriting the SwiftPM argument, which does not
+  transfer — but because the wrapper and the hand-written header then move in one commit.
+  Header drift is the live risk this repo already has a test for.
+- **Idiomatic wrapper**, not raw `DllImport`. The free-exactly-once rule belongs to the
+  GC'd language rather than to its callers.
+- **Package ID `TerraKernel.Mdpos`**, following `TerraKernel.OdxClient`.
+
+**`SafeHandle` was the obvious mechanism and does not fit — do not add one.** `tk_mdpos_free`
+takes `TkMdposBuf` *by value* because it needs `ptr`, `len` and `cap` to rebuild the Rust
+allocation exactly, while a `SafeHandle` tracks a single `IntPtr`. The wrapper instead keeps
+the buffer from ever escaping `Mdpos.Execute`, so `try/finally` bounds its lifetime
+completely and free-exactly-once becomes structural rather than a rule anyone has to honour.
+That is a stronger guarantee than SafeHandle would have bought, not a weaker substitute.
+
+Two smaller decisions worth keeping:
+
+- **`net8.0`, single-targeted.** LTS, and it has everything the wrapper needs.
+  `LibraryImport` (source-generated, AOT- and trim-safe) rather than `DllImport`, which is
+  why `IsAotCompatible` is set. The smoke harness sets `RollForward=LatestMajor` so it runs
+  on a machine carrying only a newer runtime — which is also what most consumers do.
+- **The two text backends pay one extra array copy**, decoding from the `byte[]` that
+  `Execute` returns. Deliberate: a single exit path for the free obligation is worth more
+  than a copy of a few kilobytes on a receipt.
 
 ### Facts that constrain the work
 
 - **RIDs are `win-x64` and `linux-x64`.** Nothing else — see the CI section.
-- **On a Windows machine `win-x64` builds natively, `linux-x64` does not.** WSL is the
-  obvious local route for the second; otherwise it waits for CI. Do not reach for a
-  cross-linker on Windows before trying WSL.
+- **On a Windows machine `win-x64` builds natively, `linux-x64` does not.** **WSL is not
+  installed on this machine** (checked 2026-08-16), so locally the linux leg is simply
+  unavailable and `release-nuget.yml` is the only route to it. Install WSL or use a
+  container if that changes; do not reach for a cross-linker first.
 - **`runtimes/{rid}/native/` is the layout that fails silently.** Wrong path means no build
   error and a P/Invoke failure on someone else's machine. The check is consuming the packed
   `.nupkg` from a clean throwaway project per RID, never `dotnet pack` succeeding.
+  `TerraKernel.Mdpos.csproj` now also **refuses to pack** when a claimed RID's binary is
+  missing, which closes the cheap half of that trap early. The escape hatch
+  `-p:MdposAllowMissingRuntimes=true` exists for local smoke builds and emits a warning;
+  a package built with it must never be published, and `release-nuget.yml` does not pass it.
 - **`DllImport("tk_mdpos")` resolves `tk_mdpos.dll` and `libtk_mdpos.so` automatically** on
   modern .NET. No per-platform naming needed in C#.
 - **The buffer contract is the whole ABI risk.** Every buffer — including the one returned
@@ -705,6 +826,9 @@ then fails with a checksum mismatch.
 
 ```
 # 1. Bump [workspace.package] version and the workspace.dependencies self-reference.
+#    Also bump <Version> in tk-mdpos-dotnet/TerraKernel.Mdpos/TerraKernel.Mdpos.csproj —
+#    it is not derived from Cargo.toml. ci.yml fails the build if the two disagree, so
+#    this is caught rather than shipped, but only once CI has run.
 # 2. CHANGELOG: [Unreleased] -> [X.Y.Z] with the date.
 # 3. Build the artifact; the script prints the checksum and warns against rebuilding.
 ./tk-mdpos-ffi/build-xcframework.sh
@@ -732,6 +856,13 @@ failure that nothing earlier can:
 
 Only `tk-mdpos` is published to crates.io. `tk-mdpos-cli` and `tk-mdpos-ffi` have never been
 published and publishing them is an unmade decision, not an oversight.
+
+**NuGet is not part of that hand sequence and should not become one.** `release-nuget.yml`
+fires on the same `vX.Y.Z` tag and does the whole thing — native build per RID on its own
+runner, pack, consume-verify on both RIDs, push. It needs a `NUGET_API_KEY` secret on a
+`nuget` environment; without it the publish job fails loudly rather than skipping. The
+workflow can also be dispatched manually with `publish: false` to build and verify a package
+without pushing, which is the right way to rehearse it the first time.
 
 ## Reference
 
