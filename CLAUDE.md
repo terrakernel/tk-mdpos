@@ -544,10 +544,28 @@ overflow rejection. Those are the four places §5 says the engine will be wrong.
 
 ## CI — built 2026-08-16
 
-`.github/workflows/ci.yml` and `.github/workflows/release-nuget.yml` exist. Written on the
-Windows machine, and **every Windows command in them was run locally first** rather than
-translated from the Unix ones by eye. Neither workflow has yet run on GitHub, so treat the
-first push as debugging; what is no longer guesswork is the toolchain half.
+`.github/workflows/ci.yml` and `.github/workflows/release-nuget.yml` exist and **both have
+run green**. Written on the Windows machine, with every Windows command run locally first
+rather than translated from the Unix ones by eye — which is why `ci.yml` passed all seven
+jobs on its first run.
+
+Two things the first runs settled that nothing local could:
+
+- **MSRV 1.85 is now verified.** `rust-version` claimed it and nothing checked it.
+- **`linux-x64` has been built and exercised.** It cannot be produced on either development
+  machine, so before this it was an untested support claim. The packed `.nupkg` carries
+  `runtimes/linux-x64/native/libtk_mdpos.so` (525 KB) and
+  `runtimes/win-x64/native/tk_mdpos.dll` (224 KB), and the golden corpus renders correctly
+  through both.
+
+**Do not build a path into a `sed` replacement string.** The one release-workflow failure
+was this: `GITHUB_WORKSPACE` on a Windows runner is `D:\a\tk-mdpos\tk-mdpos`, and a
+backslash in a sed *replacement* is an escape sequence — `\a` became a literal BEL byte, so
+the generated `NuGet.config` was invalid XML and NuGet rejected it with "hexadecimal value
+0x07 is an invalid character". An unquoted heredoc substitutes the value verbatim and has no
+escape rules to trip over. Note the shape of the diagnosis rather than just the fix: the
+same run's `consume on linux-x64` passed, and that contrast is what isolated the fault to
+the scaffolding instead of the package.
 
 ### Why it is urgent rather than tidy
 
@@ -733,10 +751,19 @@ stage-native.ps1            builds the cdylib and stages it under runtimes/{rid}
 README.md                   the nuget.org landing page
 ```
 
-Verified on the day: the harness passes against local sources **and** against the packed
-`.nupkg` consumed from a clean throwaway project, where the native asset resolves purely
-through `runtimes/win-x64/native/`. The package ID `TerraKernel.Mdpos` is **not yet
-reserved on nuget.org** — nothing has been pushed.
+Verified on the day: the harness passes against local sources, against the packed `.nupkg`
+consumed from a clean throwaway project, on **both RIDs in CI**, and on **paper** — a
+receipt printed from the packaged package to a TM-T82X. See "Hardware".
+
+**Two things stand between this and a published package**, neither of which is code:
+
+- The package ID `TerraKernel.Mdpos` is **not reserved on nuget.org**. Nothing has been
+  pushed, so the name is still unclaimed by anyone.
+- `release-nuget.yml`'s publish job needs a **`NUGET_API_KEY` secret on a `nuget`
+  environment**. Without it the job fails loudly rather than skipping silently, which is
+  the intended behaviour — but it has therefore never been exercised. Everything upstream
+  of it has, via `workflow_dispatch` with `publish: false`, which is the right rehearsal
+  and is worth repeating before the first real tag.
 
 **The harness renders the whole golden corpus through the C# wrapper and compares against
 `expected.bin` byte-for-byte.** That is the strongest check available: it exercises wrapper,
