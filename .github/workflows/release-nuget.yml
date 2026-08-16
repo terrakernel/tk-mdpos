@@ -179,12 +179,27 @@ jobs:
           cp "${GITHUB_WORKSPACE}/tk-mdpos-dotnet/TerraKernel.Mdpos.Smoke/Program.cs" Program.cs
           dotnet run
 
+  # Trusted Publishing, not a stored API key. GitHub mints a short-lived OIDC token, NuGet
+  # exchanges it for an API key valid for minutes, and nothing long-lived is ever kept in
+  # repository secrets — so there is no key to leak, rotate, or forget to revoke.
+  #
+  # This requires a Trusted Publishing policy on nuget.org bound to this repository and
+  # this workflow. The policy's claims must match what the token carries: repository,
+  # workflow file, and — because `environment:` is set below — the environment name too.
+  # A mismatch fails at the exchange with an authorization error rather than at the push.
   publish:
     name: publish to nuget.org
     needs: verify
     if: startsWith(github.ref, 'refs/tags/v') || inputs.publish
     runs-on: ubuntu-latest
     environment: nuget
+
+    # id-token: write is what allows the OIDC token to be requested at all. Without it the
+    # login step fails; it is not granted by default.
+    permissions:
+      id-token: write
+      contents: read
+
     steps:
       - uses: actions/setup-dotnet@v6
         with:
@@ -195,16 +210,27 @@ jobs:
           name: nupkg
           path: nupkg
 
-      - name: Push
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+      # Fail before touching nuget.org rather than after, with a message that says what to
+      # fix. An empty `user` otherwise surfaces as an opaque exchange failure.
+      - name: Check the publishing account is configured
         run: |
           set -euo pipefail
-          if [ -z "${NUGET_API_KEY}" ]; then
-            echo "NUGET_API_KEY is not set for the 'nuget' environment." >&2
+          if [ -z "${{ vars.NUGET_USER }}" ]; then
+            echo "Repository variable NUGET_USER is not set. It must name the nuget.org" >&2
+            echo "account that holds the Trusted Publishing policy for this repository." >&2
+            echo "Set it with: gh variable set NUGET_USER --body '<account>'" >&2
             exit 1
           fi
+
+      - uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Push
+        run: |
+          set -euo pipefail
           dotnet nuget push nupkg/*.nupkg \
-            --api-key "${NUGET_API_KEY}" \
+            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate

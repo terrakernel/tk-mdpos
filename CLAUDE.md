@@ -759,11 +759,24 @@ receipt printed from the packaged package to a TM-T82X. See "Hardware".
 
 - The package ID `TerraKernel.Mdpos` is **not reserved on nuget.org**. Nothing has been
   pushed, so the name is still unclaimed by anyone.
-- `release-nuget.yml`'s publish job needs a **`NUGET_API_KEY` secret on a `nuget`
-  environment**. Without it the job fails loudly rather than skipping silently, which is
-  the intended behaviour — but it has therefore never been exercised. Everything upstream
-  of it has, via `workflow_dispatch` with `publish: false`, which is the right rehearsal
-  and is worth repeating before the first real tag.
+- The publish job uses **NuGet Trusted Publishing, not a stored API key** (Julian,
+  2026-08-16 — it is what TerraKernel already uses). GitHub mints a short-lived OIDC token
+  and nuget.org exchanges it for a key valid for minutes, so there is no long-lived secret
+  to leak, rotate, or forget to revoke. **Do not reintroduce a `NUGET_API_KEY` secret.**
+
+  Three things have to line up, and a mismatch fails at the *exchange* with an
+  authorization error rather than at the push, which is a confusing place to debug from:
+
+  - `permissions: id-token: write` on the job. Not granted by default.
+  - A repository variable `NUGET_USER` naming the nuget.org account that holds the policy.
+    The `TerraKernel.OdxClient` package is owned by `TerraKernel`, but the policy may sit
+    on a personal account instead — the workflow fails early with an explicit message
+    rather than guessing.
+  - A Trusted Publishing policy on nuget.org whose claims match this repository, this
+    workflow file, **and** the `nuget` environment, since the job sets one.
+
+Everything upstream of publish has been exercised via `workflow_dispatch` with
+`publish: false`, which is the right rehearsal and is worth repeating before a real tag.
 
 **The harness renders the whole golden corpus through the C# wrapper and compares against
 `expected.bin` byte-for-byte.** That is the strongest check available: it exercises wrapper,
