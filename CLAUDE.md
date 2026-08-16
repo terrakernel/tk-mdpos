@@ -736,7 +736,7 @@ someone asking — a slice is a support claim.
 been chosen. `target/` is gitignored, so the bundle is a build output rather than a committed
 artifact.
 
-## NuGet package — built 2026-08-16, not yet published
+## NuGet package — published 2026-08-16
 
 Lives in `tk-mdpos-dotnet/`:
 
@@ -755,10 +755,24 @@ Verified on the day: the harness passes against local sources, against the packe
 consumed from a clean throwaway project, on **both RIDs in CI**, and on **paper** — a
 receipt printed from the packaged package to a TM-T82X. See "Hardware".
 
-**Two things stand between this and a published package**, neither of which is code:
+`TerraKernel.Mdpos` 0.3.0 is **live on nuget.org**, carrying both RIDs, the managed
+assembly, XML docs and NuGet's repository signature.
 
-- The package ID `TerraKernel.Mdpos` is **not reserved on nuget.org**. Nothing has been
-  pushed, so the name is still unclaimed by anyone.
+**Verify after publishing, not before** — the same rule the crates.io procedure follows, and
+it has one NuGet-specific trap. A package installed earlier from a *local* feed sits in
+`~/.nuget/packages/<id>/<version>/` under the same identity as the published one, so a
+clean-project restore will silently reuse it and prove nothing. **Delete that directory
+first**, then restore with no `NuGet.config` so the only source is nuget.org, and confirm
+the resolved source in `obj/project.assets.json`. Done for 0.3.0: the whole golden corpus
+rendered correctly through the published package.
+
+Also worth knowing for the next release: **the flat container and the search index update at
+different rates.** `api.nuget.org/v3-flatcontainer/<id>/index.json` served 0.3.0 while the
+website still showed nothing, and the flat container is what `dotnet restore` reads — so the
+package is installable well before it is *findable*. "Still indexing" is not a reason to
+wait before verifying.
+
+Remaining:
 - The publish job uses **NuGet Trusted Publishing, not a stored API key** (Julian,
   2026-08-16 — it is what TerraKernel already uses). GitHub mints a short-lived OIDC token
   and nuget.org exchanges it for a key valid for minutes, so there is no long-lived secret
@@ -782,8 +796,10 @@ receipt printed from the packaged package to a TM-T82X. See "Hardware".
   Also required: `permissions: id-token: write` on the job, which is not granted by default,
   and a policy on nuget.org that permits the package ID itself.
 
-Everything upstream of publish has been exercised via `workflow_dispatch` with
-`publish: false`, which is the right rehearsal and is worth repeating before a real tag.
+The whole pipeline ran green for 0.3.0. `workflow_dispatch` with `publish: false` exercises
+everything except the token exchange and the push, which makes it a cheap rehearsal worth
+repeating before a real tag — a policy mismatch then costs a few minutes rather than a bad
+package.
 
 **The harness renders the whole golden corpus through the C# wrapper and compares against
 `expected.bin` byte-for-byte.** That is the strongest check available: it exercises wrapper,
