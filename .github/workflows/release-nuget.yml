@@ -136,16 +136,20 @@ jobs:
           version=$(ls nupkg/*.nupkg | sed -E 's/.*TerraKernel\.Mdpos\.(.*)\.nupkg/\1/')
           mkdir -p /tmp/consumer && cd /tmp/consumer
 
-          cat > NuGet.config <<'XML'
+          # Let bash expand the path, never sed. GITHUB_WORKSPACE on Windows is
+          # D:\a\tk-mdpos\tk-mdpos, and a backslash in a sed *replacement* is an escape
+          # sequence: \a became a literal BEL byte and the config was invalid XML
+          # ("hexadecimal value 0x07 is an invalid character"). An unquoted heredoc
+          # substitutes the value verbatim and has no escape rules to trip over.
+          cat > NuGet.config <<XML
           <?xml version="1.0" encoding="utf-8"?>
           <configuration>
             <packageSources>
               <clear />
-              <add key="local" value="LOCALFEED" />
+              <add key="local" value="${GITHUB_WORKSPACE}/nupkg" />
             </packageSources>
           </configuration>
           XML
-          sed -i.bak "s|LOCALFEED|${GITHUB_WORKSPACE}/nupkg|" NuGet.config
 
           cat > Consumer.csproj <<XML
           <Project Sdk="Microsoft.NET.Sdk">
