@@ -42,9 +42,12 @@ tests/golden/              # 6 fixtures, structured as if publishable
 ```
 
 The v0.1 pipeline is complete end to end and **§12 has been claimed** — see "Hardware" below.
-QR followed it. What remains outstanding is the CP437 high range in `emit::escpos::encode_text`
-(non-ASCII in *text* is currently rejected, which is also what blocks the unicode golden
-fixture; QR payloads are unaffected and go out as UTF-8).
+QR followed it, then the C ABI, the Apple XCFramework, and the NuGet package.
+
+The one functional gap is that **non-ASCII text is rejected** — `emit::escpos::encode_text`
+covers ASCII only. That is deliberately deprioritized rather than pending; see "Backlog",
+which also explains why "add CP437" is the wrong way to frame the fix. QR payloads are
+unaffected and go out as UTF-8.
 
 Keep the workspace split. The moment `tk-mdpos` gains a dependency that touches the filesystem,
 §1.1 is already lost. `serde` is an optional feature used only to deserialize fixture profiles;
@@ -934,6 +937,63 @@ runner, pack, consume-verify on both RIDs, push. It needs a `NUGET_API_KEY` secr
 `nuget` environment; without it the publish job fails loudly rather than skipping. The
 workflow can also be dispatched manually with `publish: false` to build and verify a package
 without pushing, which is the right way to rehearse it the first time.
+
+## Backlog
+
+Things that are wanted but not urgent. Distinct from "Scope discipline" above, which lists
+things that are **not decided** — these are decided, just not scheduled. Nothing here is
+blocking anything else.
+
+### Not in a rush
+
+- **CP437 high range in `emit::escpos::encode_text`** — deprioritized by Julian,
+  2026-08-16, on the grounds that CP437 is old and little modern software uses it.
+
+  The conclusion is right and the reasoning is worth restating, because taken literally it
+  would point at the wrong fix later. **CP437 is not a choice about what modern systems
+  use** — it is what the printer's ROM offers, selected with `ESC t`, and the receipt gets
+  it whether or not anything else in the stack has heard of it. And the actual gap is not
+  "CP437 is missing" but **"non-ASCII text is rejected"**; CP437 is merely one candidate
+  answer to it. Whoever picks this up should decide what the code page *should* be — CP858
+  buys the euro sign, and the Epson multi-byte modes are a different mechanism entirely —
+  before writing any table.
+
+  What makes it genuinely safe to defer is the failure mode, not the character coverage:
+  non-ASCII **errors rather than mangles**. A silently substituted `?` on a printed receipt
+  becomes a support call that never traces back to the encoder, so the current behaviour is
+  the safe direction. The target market is Indonesian retail, which is ASCII in practice —
+  right up until a customer name isn't, which is when this comes back.
+
+  Blocks the unicode golden fixture, which is why `tests/golden/` has six cases rather than
+  seven. QR payloads are unaffected: they bypass the code page and go out as UTF-8.
+
+- **Watch mode (`--html --watch`).** Deferred, not rejected, and now decidable — it was held
+  behind the HTML preview being good enough to be worth watching, and that condition was met
+  on 2026-08-15. One file-watcher dependency in the CLI only, with reload injected by the
+  CLI so the core keeps emitting a clean fragment. Would be the clearest demonstration of
+  the whole thesis: edit the template, the receipt updates, no compile.
+
+- **`cargo fmt --check` in CI.** The repo is not rustfmt-clean — `emit/escpos.rs` has at
+  least two pre-existing diffs, most likely from edition 2024's style changes. Do the
+  reformat as its own commit first (formatting cannot change emitted bytes, and the golden
+  fixtures prove it), then enable the gate. **Julian has not signed off on that diff.**
+
+- **TSan on a schedule.** It needs nightly plus `-Zbuild-std`, which rebuilds core and std
+  and costs minutes, so it does not belong on every push. Weekly or manual dispatch. ASan
+  already runs on every push and is the one that matters.
+
+- **Automating the release procedure.** The sequence in "Releasing" is the specification and
+  has been run by hand once, for 0.3.0. Run it the same way once more before turning it into
+  a workflow. Note NuGet is already automated and deliberately not part of that hand
+  sequence.
+
+### Unmade decisions, not tasks
+
+- Publishing `tk-mdpos-cli` and `tk-mdpos-ffi`. Never published; that is a decision nobody
+  has made rather than an oversight.
+- tvOS, watchOS, visionOS and Mac Catalyst slices in the XCFramework. `rustup` offers the
+  targets and the script could trivially grow them. **A slice is a support claim** — do not
+  add one without someone asking.
 
 ## Reference
 
