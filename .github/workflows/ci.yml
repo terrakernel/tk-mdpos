@@ -31,7 +31,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Golden fixtures are compared byte-for-byte against LF output. .gitattributes pins
       # them, so a CRLF checkout here means the attributes are wrong rather than the engine.
@@ -86,7 +86,7 @@ jobs:
     name: AddressSanitizer over smoke.c
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The allocation contract is the whole ABI risk: every buffer must go back through
       # tk_mdpos_free and never free(), and `cap` has to round-trip so Vec::from_raw_parts
@@ -104,7 +104,7 @@ jobs:
     name: MSRV 1.85
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # rust-version in the workspace manifest claims 1.85 and nothing currently verifies
       # the claim. Edition 2024 needs exactly this, so the floor is real rather than chosen.
@@ -118,7 +118,7 @@ jobs:
     name: packaged crate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Never `cargo publish --dry-run`. Its verify step only builds the lib: it never
       # builds or runs tests and never checks that the licence and readme files exist, so
@@ -138,9 +138,9 @@ jobs:
     name: NuGet package (win-x64 asset)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
 

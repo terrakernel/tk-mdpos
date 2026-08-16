@@ -42,7 +42,7 @@ jobs:
             artifact: libtk_mdpos.so
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The cdylib is what ships: DllImport("tk_mdpos") resolves tk_mdpos.dll and
       # libtk_mdpos.so with no per-platform naming in the C# wrapper. That is the tk-
@@ -56,7 +56,7 @@ jobs:
           set -euxo pipefail
           test -f "target/release/${{ matrix.artifact }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: native-${{ matrix.rid }}
           path: target/release/${{ matrix.artifact }}
@@ -67,18 +67,18 @@ jobs:
     needs: native
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: native-win-x64
           path: tk-mdpos-dotnet/runtimes/win-x64/native
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: native-linux-x64
           path: tk-mdpos-dotnet/runtimes/linux-x64/native
@@ -92,7 +92,7 @@ jobs:
       - name: Show what was packed
         run: unzip -l nupkg/*.nupkg
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nupkg
           path: nupkg/*.nupkg
@@ -112,13 +112,13 @@ jobs:
             rid: linux-x64
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: nupkg
           path: nupkg
@@ -182,11 +182,11 @@ jobs:
     runs-on: ubuntu-latest
     environment: nuget
     steps:
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: nupkg
           path: nupkg
