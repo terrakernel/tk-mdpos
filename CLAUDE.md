@@ -636,6 +636,50 @@ someone asking — a slice is a support claim.
 been chosen. `target/` is gitignored, so the bundle is a build output rather than a committed
 artifact.
 
+## Releasing
+
+Done by hand for 0.3.0 (2026-08-16) and validated end to end. Automate this as a workflow
+only after it has been run once more the same way — the sequence below is the specification.
+
+**One git tag serves everything**: the Rust crate version, the GitHub Release, and the Swift
+package version. SwiftPM resolves from tags, so they cannot diverge.
+
+**There is no chicken-and-egg between checksum and publish.** A release asset URL is
+deterministic for a given tag, so the zip is checksummed locally, `Package.swift` is written
+with the predicted URL, and that same zip is uploaded afterwards. The one rule: **do not
+rebuild between computing the checksum and uploading** — different bytes, and resolution
+then fails with a checksum mismatch.
+
+```
+# 1. Bump [workspace.package] version and the workspace.dependencies self-reference.
+# 2. CHANGELOG: [Unreleased] -> [X.Y.Z] with the date.
+# 3. Build the artifact; the script prints the checksum and warns against rebuilding.
+./tk-mdpos-ffi/build-xcframework.sh
+# 4. Package.swift: update BOTH the URL (tag) and the checksum. They move together.
+# 5. Prove the crate ships correctly — never `cargo publish --dry-run`, which only builds
+#    the lib and would pass while defects ship.
+cargo package -p tk-mdpos
+cd target/package/tk-mdpos-<version>/ && cargo test && cargo test --features serde
+# 6. Commit, merge to main, push. Then tag and push the tag.
+git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z
+# 7. Release with the artifact attached. Upload the zip that was checksummed.
+gh release create vX.Y.Z --title vX.Y.Z --notes-file NOTES.md target/TkMdpos.xcframework.zip
+# 8. cargo publish -p tk-mdpos
+```
+
+**Verify after publishing, not before.** Three checks, each of which catches a different
+failure that nothing earlier can:
+
+- Download the *published* asset and recompute its checksum against `Package.swift`. Catches
+  a stale or mismatched upload.
+- Resolve the package from a clean directory with `.package(url:from:)` and run something
+  against it. SwiftPM verifies the checksum during resolution, so this is the real proof.
+- `cargo new` elsewhere, `cargo add tk-mdpos@X.Y.Z`, call the new API. Catches the
+  packaging traps that a local build cannot see.
+
+Only `tk-mdpos` is published to crates.io. `tk-mdpos-cli` and `tk-mdpos-ffi` have never been
+published and publishing them is an unmade decision, not an oversight.
+
 ## Reference
 
 Use the Epson ESC/POS Command Reference, not blog posts. v0.1 command set is tabulated in
